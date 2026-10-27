@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex,nofollow,noarchive">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://static.line-scdn.net; connect-src https://api.line.me; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://static.line-scdn.net; connect-src https://api.line.me https://script.google.com; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
   <title>LINE本人認証 試験ページ</title>
   <style>
     :root { color-scheme: light; font: 16px/1.65 system-ui, sans-serif; color: #182230; background: #f5f7f9; }
@@ -25,21 +25,24 @@
 <main>
   <section>
     <h1>LINE本人認証 試験ページ</h1>
-    <p class="status"><strong>準備完了。LIFFはボタンを押すまで初期化しません。</strong></p>
-    <p>このページで確認するのはLIFF初期化とログイン状態だけです。ID tokenは取得・送信しません。</p>
+    <p class="status"><strong>準備完了。LIFFは初期化ボタンを押すまで初期化しません。</strong></p>
+    <p>初期化とログイン状態の確認後、本人認証テストは別ボタンから開始します。確認ダイアログに同意するまでID tokenを取得・送信しません。</p>
   </section>
   <section>
     <h2>安全上の範囲</h2>
     <ul>
       <li>LINEログインが必要な場合だけLINEログインへ移動します。</li>
-      <li>ID tokenの取得、GASへの送信、ユーザー情報の取得は行いません。</li>
-      <li>認証情報や内部エラーの詳細を画面、URL、console、保存領域に出しません。</li>
+      <li>本人認証ボタンと確認ダイアログの両方で操作した場合だけ、ID tokenを隔離GASへ1回送信します。</li>
+      <li>ID tokenは画面、URL、console、保存領域に記録せず、送信後はメモリから破棄します。</li>
+      <li>GASの実行履歴・自動エラー記録にPOST本文が残るかは未確認です。</li>
     </ul>
   </section>
   <section>
     <h2>LIFF初期化・ログイン状態</h2>
-    <p id="result" role="status" aria-live="polite">まだLIFFを初期化していません。開始ボタンを押してください。</p>
-    <button id="verify" type="button">本人認証を開始</button>
+    <p id="result" role="status" aria-live="polite">まだLIFFを初期化していません。初期化ボタンを押してください。</p>
+    <button id="initialize" type="button">LIFF初期化・ログイン状態を確認</button>
+    <button id="verify" type="button" disabled>本人認証テスト（ID tokenを送信）</button>
+    <p class="muted">本人認証テストは、確認済みの隔離GASへLINE ID tokenを送信し、LINE公式Verify APIで検証します。実行履歴等に本文が記録されるかは確認できていません。</p>
   </section>
 </main>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js" defer></script>
