@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow">
+  <title>LINE認証 隔離GAS 固定値POST確認</title>
+  <style>
+    :root { color-scheme: light; font: 16px/1.6 system-ui, sans-serif; color: #182230; background: #f5f7f9; }
+    body { margin: 0; padding: 24px 16px; }
+    main { max-width: 42rem; margin: 0 auto; }
+    section { background: #fff; border: 1px solid #d8e0e7; border-radius: 12px; padding: 20px; margin: 14px 0; }
+    h1 { font-size: 1.35rem; margin: 0 0 10px; }
+    p { margin: .6rem 0; }
+    button { box-sizing: border-box; width: 100%; min-height: 46px; padding: 10px 12px; margin-top: 12px; border: 0; border-radius: 7px; background: #1769aa; color: #fff; font: inherit; font-weight: 700; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    .muted { color: #526170; font-size: .94rem; }
+    #result { min-height: 1.6em; }
+    code { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+<main>
+  <section>
+    <h1>LINE認証 隔離GAS 固定値POST確認</h1>
+    <p>このページは固定文字列 <code>codex-fixed-probe-v1</code> だけを、コード内で固定した隔離GASへ送信し、JSON応答を読み取る通信確認用です。</p>
+    <p class="muted">LINE SDKやLINE ID tokenの取得・送信、LINE認証APIの呼び出しは行いません。勤怠データ、Sheets、既存GASにはアクセスしません。固定値POSTの成功は本人確認の成功を意味しません。</p>
+  </section>
+  <section>
+    <p><strong>送信先:</strong> <span id="endpoint-status">確認済みの隔離GAS URL（コード内固定）</span></p>
+    <button id="send" type="button">固定値POSTを送信</button>
+    <p id="result" role="status" aria-live="polite">固定値POSTだけを実行できます。送信前に確認画面が表示されます。</p>
+  </section>
+</main>
+<script>
+(() => {
+  'use strict';
+  // User confirmed this exact URL is the current /exec URL of the isolated
+  // verification deployment. Never read an endpoint from user input, the URL,
+  // browser storage, or another runtime source.
+  const ALLOWED_GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbzWMpCtYx-ZQpu1duylWq5BBXT9UmXsie4hF3Vjcuj80q3GpVNHTEekLvInemris23S/exec';
+  const FIXED_PROBE = 'codex-fixed-probe-v1';
+  const button = document.getElementById('send');
+  const result = document.getElementById('result');
+  const endpointStatus = document.getElementById('endpoint-status');
+
+  function isReviewedEndpoint(value) {
+    if (!value) return false;
+    try {
+      const url = new URL(value);
+      return url.href === value &&
+        url.protocol === 'https:' &&
+        url.hostname === 'script.google.com' &&
+        url.port === '' &&
+        /^\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(url.pathname) &&
+        !url.username && !url.password && !url.search && !url.hash;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  const endpointReady = isReviewedEndpoint(ALLOWED_GAS_ENDPOINT);
+  if (endpointReady) {
+    endpointStatus.textContent = 'コード内の固定URL';
+    button.disabled = false;
+    button.textContent = '固定値POSTを送信';
+    result.textContent = '固定値POSTだけを実行できます。';
+  }
+
+  button.addEventListener('click', async () => {
+    if (!endpointReady || !isReviewedEndpoint(ALLOWED_GAS_ENDPOINT)) {
+      result.textContent = '送信先が未設定か、許可された形式ではありません。送信していません。';
+      return;
+    }
+    if (!window.confirm('固定文字列「' + FIXED_PROBE + '」だけを、コード内で固定された隔離GASへ送信します。LINE ID tokenは取得・送信しません。続行しますか？')) {
+      result.textContent = 'キャンセルしました。送信していません。';
+      return;
+    }
+
+    button.disabled = true;
+    result.textContent = '固定値POSTを送信し、応答を確認しています…';
+    try {
+      const response = await fetch(ALLOWED_GAS_ENDPOINT, {
+        method: 'POST',
+        mode: 'cors',
+        credentials: 'omit',
+        redirect: 'follow',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: new URLSearchParams({ probe: FIXED_PROBE })
+      });
+      let body;
+      try {
+        body = await response.json();
+      } catch (_) {
+        result.textContent = '応答をJSONとして読み取れませんでした。固定値以外は送信していません。';
+        return;
+      }
+      if (response.ok && body && body.probe === FIXED_PROBE && body.received === true) {
+        result.textContent = '成功：固定値POSTの応答を読み取れました（HTTP ' + response.status + '）。本人確認の成功を意味しません。';
+      } else {
+        result.textContent = '応答は届きましたが、固定値確認用の形式と一致しません。本人確認は行っていません。';
+      }
+    } catch (_) {
+      result.textContent = '通信に失敗しました（CORS、ネットワーク、またはリダイレクト後の応答読取エラー）。POSTがGASへ届いたかは、この画面だけでは判断できません。';
+    } finally {
+      button.disabled = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>
+
