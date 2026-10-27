@@ -87,17 +87,25 @@
         headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
         body: new URLSearchParams({ probe: 'codex-fixed-probe-v1' })
       });
-      let body;
+      let responseText;
       try {
-        body = await response.json();
+        responseText = await response.text();
       } catch (_) {
-        throw new Error('応答をJSONとして読み取れませんでした。HTTP ' + response.status);
+        throw new Error('応答本文を読み取れませんでした。HTTP ' + response.status);
       }
 
-      if (response.ok && body && body.ok === true && body.method === 'POST' && body.received === true) {
+      let body;
+      try {
+        body = JSON.parse(responseText.replace(/^\uFEFF/, '').trim());
+      } catch (_) {
+        result.textContent = 'HTTP ' + response.status + ' の応答は届きましたが、JSONとして解析できませんでした。固定値以外は送信していません。';
+        return;
+      }
+
+      if (response.ok && body && body.probe === 'codex-fixed-probe-v1' && body.received === true) {
         result.textContent = '成功：固定値POSTのJSON応答を読み取れました。HTTP ' + response.status + '。これはLINE ID token認証の成功を意味しません。';
       } else {
-        result.textContent = '応答内容を確認できませんでした。HTTP ' + response.status + '。固定値以外は送信していません。';
+        result.textContent = 'JSON応答は読み取れましたが、固定値確認用の内容と一致しません。HTTP ' + response.status + '。固定値以外は送信していません。';
       }
     } catch (error) {
       result.textContent = '通信または応答読取に失敗しました。ブラウザーのネットワーク表示で状況を確認してください。POSTがGASへ到達したかは、この画面だけでは判断できません。';
