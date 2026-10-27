@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pages → GAS 固定値 POST 疎通試験</title>
+  <style>body{font:16px/1.6 system-ui,sans-serif;max-width:42rem;margin:2rem auto;padding:0 1rem;color:#182230}label,input,button{display:block;width:100%;box-sizing:border-box}input,button{font:inherit;padding:.7rem;margin:.4rem 0 1rem}button{cursor:pointer}#result{white-space:pre-wrap;overflow-wrap:anywhere;padding:1rem;background:#f2f4f7}</style>
+</head>
+<body>
+  <h1>Pages → GAS 固定値 POST 疎通試験</h1>
+  <p>このページは固定文字列だけを送ります。LINE IDトークン、個人情報、シート値は送信せず、書き込みもしません。</p>
+  <form id="probe-form">
+    <label for="endpoint">隔離GASウェブアプリのURL（/exec）</label>
+    <input id="endpoint" type="url" autocomplete="off" required placeholder="https://script.google.com/macros/s/.../exec">
+    <button type="submit">固定値POSTを試す</button>
+  </form>
+  <p id="result" role="status">未実行</p>
+  <script>
+    const form = document.getElementById('probe-form');
+    const result = document.getElementById('result');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const endpoint = document.getElementById('endpoint').value.trim();
+      result.textContent = '送信中…';
+      try {
+        const response = await fetch(endpoint, {method:'POST',mode:'cors',credentials:'omit',redirect:'follow',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body:new URLSearchParams({probe:'pages-gas-post-smoke-v1'})});
+        const body = await response.json();
+        if (response.ok && body.ok === true && body.method === 'POST' && body.received === true) {result.textContent='成功：固定値POSTの応答本文を読み取れました。HTTP '+response.status+' / 最終URL: '+new URL(response.url).origin;}
+        else {result.textContent='応答を確認できませんでした。HTTP '+response.status+' / code: '+String(body.error||'unexpected_response');}
+      } catch (_) {result.textContent='失敗または応答読取不可。POSTの到達有無はこの画面だけでは判断できません。GAS URL、デプロイ、ブラウザーのネットワーク表示を確認してください。';}
+    });
+  </script>
+</body>
+</html>
