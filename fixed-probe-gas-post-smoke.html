@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow">
+  <title>GitHub Pages → 隔離GAS 固定値POST検証</title>
+  <style>
+    :root { color-scheme: light; font: 16px/1.6 system-ui, sans-serif; color: #182230; background: #f5f7f9; }
+    body { margin: 0; padding: 24px 16px; }
+    main { max-width: 42rem; margin: 0 auto; }
+    section { background: #fff; border: 1px solid #d8e0e7; border-radius: 12px; padding: 20px; margin: 14px 0; }
+    h1 { font-size: 1.35rem; margin: 0 0 10px; }
+    p { margin: .6rem 0; }
+    label { display: block; font-weight: 650; margin-bottom: 6px; }
+    input, button { box-sizing: border-box; width: 100%; min-height: 46px; padding: 10px 12px; font: inherit; }
+    input { border: 1px solid #aab6c2; border-radius: 7px; }
+    button { margin-top: 14px; border: 0; border-radius: 7px; background: #1769aa; color: #fff; font-weight: 700; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: wait; }
+    .muted { color: #526170; font-size: .94rem; }
+    #result { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1.6em; }
+    code { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+<main>
+  <section>
+    <h1>GitHub Pages → 隔離GAS 固定値POST検証</h1>
+    <p>このページは入力された隔離GASのURLへ、固定文字列 <code>codex-fixed-probe-v1</code> だけを一度送信し、JSON応答を確認します。</p>
+    <p class="muted">LINE SDK、LINE ID token、プロフィール、個人情報は扱いません。勤怠データやSheetsへの書き込みもしません。URLはこのページに保存・表示せず、GitHubにも含めません。</p>
+  </section>
+  <section>
+    <form id="probe-form">
+      <label for="endpoint">隔離GASウェブアプリのURL（/exec）</label>
+      <input id="endpoint" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" required placeholder="https://script.google.com/macros/s/.../exec">
+      <button id="submit" type="submit">固定値POSTを送信</button>
+    </form>
+    <p id="result" role="status" aria-live="polite">未実行</p>
+  </section>
+</main>
+<script>
+(() => {
+  'use strict';
+  const form = document.getElementById('probe-form');
+  const endpointInput = document.getElementById('endpoint');
+  const submitButton = document.getElementById('submit');
+  const result = document.getElementById('result');
+
+  function validateEndpoint(value) {
+    let url;
+    try {
+      url = new URL(value);
+    } catch (_) {
+      throw new Error('URLの形式を確認してください。');
+    }
+    if (url.protocol !== 'https:' || url.hostname !== 'script.google.com' || !/^\/macros\/s\/[^/]+\/exec\/?$/.test(url.pathname) || url.username || url.password || url.search || url.hash) {
+      throw new Error('https://script.google.com/macros/s/.../exec の形式で入力してください。');
+    }
+    return url.href;
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    let endpoint;
+    try {
+      endpoint = validateEndpoint(endpointInput.value.trim());
+    } catch (error) {
+      result.textContent = error.message;
+      return;
+    }
+
+    const confirmed = window.confirm('固定値「codex-fixed-probe-v1」だけを入力された隔離GASへ送信します。LINE ID tokenや個人情報は取得・送信しません。続行しますか？');
+    if (!confirmed) {
+      result.textContent = 'キャンセルしました。送信していません。';
+      return;
+    }
+
+    submitButton.disabled = true;
+    result.textContent = '送信中…';
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        mode: 'cors',
+        credentials: 'omit',
+        redirect: 'follow',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: new URLSearchParams({ probe: 'codex-fixed-probe-v1' })
+      });
+      let body;
+      try {
+        body = await response.json();
+      } catch (_) {
+        throw new Error('応答をJSONとして読み取れませんでした。HTTP ' + response.status);
+      }
+
+      if (response.ok && body && body.ok === true && body.method === 'POST' && body.received === true) {
+        result.textContent = '成功：固定値POSTのJSON応答を読み取れました。HTTP ' + response.status + '。これはLINE ID token認証の成功を意味しません。';
+      } else {
+        result.textContent = '応答内容を確認できませんでした。HTTP ' + response.status + '。固定値以外は送信していません。';
+      }
+    } catch (error) {
+      result.textContent = '通信または応答読取に失敗しました。ブラウザーのネットワーク表示で状況を確認してください。POSTがGASへ到達したかは、この画面だけでは判断できません。';
+    } finally {
+      submitButton.disabled = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>
