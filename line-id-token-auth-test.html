@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <meta name="robots" content="noindex,nofollow,noarchive">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://static.line-scdn.net; connect-src https://script.google.com https://script.googleusercontent.com; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://static.line-scdn.net; connect-src https://api.line.me; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
   <title>LINE本人認証 試験ページ</title>
   <style>
     :root { color-scheme: light; font: 16px/1.65 system-ui, sans-serif; color: #182230; background: #f5f7f9; }
@@ -18,130 +18,31 @@
     .status { padding: 12px; border-left: 4px solid #147d64; background: #eaf8f3; }
     .muted { color: #526170; font-size: .94rem; }
     button { box-sizing: border-box; width: 100%; min-height: 46px; padding: 10px 12px; margin-top: 12px; border: 0; border-radius: 7px; background: #06c755; color: #082c18; font: inherit; font-weight: 700; }
-    button:disabled { opacity: .72; cursor: not-allowed; }
+    button:disabled { opacity: .72; cursor: wait; }
   </style>
 </head>
 <body>
 <main>
   <section>
     <h1>LINE本人認証 試験ページ</h1>
-    <p class="status"><strong>準備完了。本人認証はボタンを押すまで開始されません。</strong></p>
-    <p>ボタンを押すとLIFFを初期化します。ログインが必要な場合はLINEログインへ進みます。ログイン後、もう一度ボタンを押すと送信前の確認を表示します。</p>
+    <p class="status"><strong>準備完了。LIFFはボタンを押すまで初期化しません。</strong></p>
+    <p>このページで確認するのはLIFF初期化とログイン状態だけです。ID tokenは取得・送信しません。</p>
   </section>
   <section>
-    <h2>送信とデータの扱い</h2>
+    <h2>安全上の範囲</h2>
     <ul>
-      <li>ID tokenの送信先は確認済みの隔離GASに固定しています。送信先の入力欄はありません。</li>
-      <li>確認後に限り、tokenをPOST本文の <code>id_token</code> として一度送信します。</li>
-      <li>tokenやユーザー情報を画面、URL、console、ブラウザー保存領域、明示ログに記録しません。</li>
-      <li>Apps Scriptの実行履歴などGoogle側の自動記録にPOST本文が残るかは未確認です。</li>
-      <li>このページは noindex 指定ですが、公開URLを知る人はアクセスできます。</li>
+      <li>LINEログインが必要な場合だけLINEログインへ移動します。</li>
+      <li>ID tokenの取得、GASへの送信、ユーザー情報の取得は行いません。</li>
+      <li>認証情報や内部エラーの詳細を画面、URL、console、保存領域に出しません。</li>
     </ul>
   </section>
   <section>
-    <h2>本人認証テスト</h2>
+    <h2>LIFF初期化・ログイン状態</h2>
     <p id="result" role="status" aria-live="polite">まだLIFFを初期化していません。開始ボタンを押してください。</p>
     <button id="verify" type="button">本人認証を開始</button>
-    <p class="muted">ボタンを押しただけではID tokenは取得・送信しません。送信直前に、送信先と未確認事項を含む確認ダイアログを表示します。</p>
   </section>
 </main>
-<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
-<script>
-(() => {
-  'use strict';
-  const LIFF_ID = '2012227652-CgVMkyBb';
-  const GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbzWMpCtYx-ZQpu1duylWq5BBXT9UmXsie4hF3Vjcuj80q3GpVNHTEekLvInemris23S/exec';
-  const INIT_TIMEOUT_MS = 30000;
-  const REQUEST_TIMEOUT_MS = 30000;
-  const result = document.getElementById('result');
-  const button = document.getElementById('verify');
-  let initialized = false;
-  let busy = false;
-
-  function withTimeout(promise, ms) {
-    let timer;
-    return Promise.race([
-      promise,
-      new Promise((_, reject) => { timer = window.setTimeout(() => reject(new Error('timeout')), ms); })
-    ]).finally(() => window.clearTimeout(timer));
-  }
-
-  function validEndpoint() {
-    try {
-      const u = new URL(GAS_ENDPOINT);
-      return u.href === GAS_ENDPOINT && u.protocol === 'https:' && u.hostname === 'script.google.com' &&
-        u.port === '' && /^\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(u.pathname) &&
-        !u.search && !u.hash && !u.username && !u.password;
-    } catch (_) { return false; }
-  }
-
-  function show(message) { result.textContent = message; }
-
-  async function startOrVerify() {
-    if (busy) return;
-    if (!validEndpoint()) { show('固定送信先を確認できません。処理を停止しました。'); return; }
-    if (!window.liff) { show('LINE SDKを読み込めませんでした。通信環境を確認してください。'); return; }
-    busy = true;
-    button.disabled = true;
-    try {
-      if (!initialized) {
-        show('LIFFを初期化しています。ID tokenはまだ取得・送信していません。');
-        await withTimeout(window.liff.init({ liffId: LIFF_ID }), INIT_TIMEOUT_MS);
-        initialized = true;
-      }
-      if (!window.liff.isLoggedIn()) {
-        show('LINEログインが必要です。LINEログインへ移動します。');
-        window.liff.login();
-        return;
-      }
-      if (!window.confirm('LINE本人認証のID tokenを、確認済みの隔離GASへ一度送信します。Google側の自動ログ記録にPOST本文が残るかは未確認です。tokenやユーザー情報は画面・URL・console・保存領域には表示・保存しません。送信しますか？')) {
-        show('キャンセルしました。ID tokenは取得・送信していません。');
-        return;
-      }
-
-      let token = null;
-      let controller = null;
-      try {
-        token = window.liff.getIDToken();
-        if (typeof token !== 'string' || token.length < 20) throw new Error('token-unavailable');
-        controller = new AbortController();
-        const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-        try {
-          const response = await fetch(GAS_ENDPOINT, {
-            method: 'POST', mode: 'cors', credentials: 'omit', redirect: 'follow',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-            body: new URLSearchParams({ id_token: token }), signal: controller.signal,
-            referrerPolicy: 'no-referrer', cache: 'no-store'
-          });
-          let data;
-          try { data = await response.json(); } catch (_) { data = null; }
-          if (!data || !Object.prototype.hasOwnProperty.call(data, 'verified') ||
-              !(data.verified === true || data.verified === false || data.verified === null)) {
-            show('認証結果は未確認です。GASの応答形式を読み取れませんでした。'); return;
-          }
-          if (!response.ok) { show('認証結果は未確認です。GASがHTTPエラーを返しました。'); return; }
-          if (data.verified === true) show('本人確認に成功しました。tokenやユーザー情報は表示していません。');
-          else if (data.verified === false) show('LINEによる本人確認に失敗しました。');
-          else show('認証結果は未確認です。');
-        } finally { window.clearTimeout(timeout); }
-      } catch (_) {
-        show('通信または本人認証に失敗しました。内部情報は表示していません。送信到達の有無は判定できません。');
-      } finally {
-        token = null;
-        controller = null;
-      }
-    } catch (_) {
-      show('LIFF初期化に失敗または時間切れになりました。LIFF Endpoint URLと公開ページURLの関係を確認してください。');
-    } finally {
-      busy = false;
-      button.disabled = false;
-      button.textContent = initialized && window.liff && window.liff.isLoggedIn() ? '本人認証をもう一度試す' : '本人認証を開始';
-    }
-  }
-
-  button.addEventListener('click', startOrVerify);
-})();
-</script>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js" defer></script>
+<script src="./line-id-token-auth-test.js" defer></script>
 </body>
 </html>
-
