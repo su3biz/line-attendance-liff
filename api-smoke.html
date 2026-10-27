@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Pages → GAS 読み取り専用通信確認</title>
+  <style>
+    :root { color-scheme: light; font-family: system-ui, sans-serif; color: #17202a; background: #f5f7f8; }
+    body { margin: 0; padding: 20px; }
+    main { max-width: 620px; margin: 0 auto; }
+    section { background: #fff; border: 1px solid #d9e0e5; border-radius: 12px; padding: 18px; margin: 14px 0; }
+    h1 { font-size: 1.3rem; margin: 0 0 8px; }
+    p { line-height: 1.6; }
+    label { display: block; font-weight: 650; margin: 12px 0 6px; }
+    input, button { box-sizing: border-box; width: 100%; min-height: 44px; padding: 9px 10px; font: inherit; }
+    input { border: 1px solid #9aa7b0; border-radius: 7px; }
+    button { border: 0; border-radius: 7px; background: #1769aa; color: #fff; font-weight: 700; margin-top: 12px; }
+    button:disabled { opacity: .6; }
+    #result { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .muted { color: #53616b; font-size: .93rem; }
+    .success { color: #146c2e; } .failure { color: #a12622; }
+  </style>
+</head>
+<body>
+<main>
+  <section>
+    <h1>Pages → GAS 読み取り専用通信確認</h1>
+    <p class="muted">固定JSONのGET応答だけを確認します。LIFF、認証情報、個人情報、Sheetsは使いません。入力URLは保存されません。</p>
+  </section>
+  <section>
+    <label for="endpoint">隔離テスト用GAS WebアプリURL</label>
+    <input id="endpoint" type="url" inputmode="url" autocomplete="off"
+      placeholder="https://script.google.com/macros/s/.../exec">
+    <button id="run" type="button">CORS fetchで確認</button>
+    <p id="result" role="status" aria-live="polite">まだ通信していません。</p>
+  </section>
+  <section class="muted">
+    <strong>成功条件</strong>
+    <p>HTTP成功、リダイレクト後の応答をJavaScriptで読み取り、ContentServiceの固定JSONと一致すること。通信完了だけ、opaque応答、no-cors応答は成功にしません。</p>
+    <p>結果にURL、レスポンス本文全体、例外オブジェクトは表示しません。</p>
+  </section>
+</main>
+<script>
+(() => {
+  'use strict';
+  const endpoint = document.getElementById('endpoint');
+  const button = document.getElementById('run');
+  const result = document.getElementById('result');
+  const expected = {
+    ok: true,
+    service: 'line-attendance-api-smoke',
+    version: 1,
+    message: '固定の読み取り専用テスト応答です。'
+  };
+
+  function show(text, success) {
+    result.textContent = text;
+    result.className = success ? 'success' : 'failure';
+  }
+
+  button.addEventListener('click', async () => {
+    let url;
+    try {
+      url = new URL(endpoint.value.trim());
+      if (url.protocol !== 'https:' ||
+          url.hostname !== 'script.google.com' ||
+          !/^\/macros\/s\/[^/]+\/exec$/.test(url.pathname) ||
+          url.search || url.hash || url.username || url.password) {
+        show('URL形式を確認してください。script.google.com の /macros/s/.../exec を入力し、クエリやフラグメントは付けません。', false);
+        return;
+      }
+    } catch (_) {
+      show('有効なGAS WebアプリURLを入力してください。', false);
+      return;
+    }
+
+    button.disabled = true;
+    show('GETを送信しています…', false);
+    try {
+      const response = await fetch(url.href, {
+        method: 'GET',
+        mode: 'cors',
+        redirect: 'follow',
+        cache: 'no-store',
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer'
+      });
+
+      if (response.type === 'opaque' || response.type === 'opaqueredirect') {
+        show('失敗：ブラウザーが応答本文を公開しない応答です。opaque応答は成功扱いしません。', false);
+        return;
+      }
+      if (!response.ok) {
+        show('失敗：HTTP応答はありましたが、成功ステータスではありません。', false);
+        return;
+      }
+      if (!response.redirected || new URL(response.url).hostname !== 'script.googleusercontent.com') {
+        show('未確認：期待するContentServiceのリダイレクト先を確認できませんでした。', false);
+        return;
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.toLowerCase().includes('application/json')) {
+        show('失敗：読み取れた応答のContent-TypeがJSONではありません。', false);
+        return;
+      }
+      const body = await response.json();
+      const matches = Object.keys(expected).every(key => body &&
+        Object.prototype.hasOwnProperty.call(body, key) && body[key] === expected[key]) &&
+        Object.keys(body).length === Object.keys(expected).length;
+      if (!matches) {
+        show('失敗：読み取れたJSONが固定テスト応答と一致しません。', false);
+        return;
+      }
+      show('成功：CORS fetchで固定JSONを読み取り、ContentServiceのリダイレクトを確認しました。これは勤怠APIの認証・権限やSheets連携の検証ではありません。', true);
+    } catch (_) {
+      show('失敗：JavaScriptから応答を読み取れませんでした。CORS、リダイレクト、アクセス設定をブラウザーの開発者ツールで確認してください。通信が送信されたように見えても成功とは判定しません。', false);
+    } finally {
+      button.disabled = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>
