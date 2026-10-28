@@ -14,15 +14,17 @@ async function initialize(){
   liffReady=true;
   buttons.forEach(b=>b.disabled=false);
   if(liff.isLoggedIn()){
-   const profile=await liff.getProfile();
-   if(!profile||typeof profile.userId!=='string'||!profile.userId){lineUserIdNode.textContent='LINEユーザーIDを取得できませんでした。';}
-   else{lineUserId=profile.userId;lineUserIdNode.textContent=lineUserId;copyLineUserIdButton.disabled=false;}
+   try{
+    const profile=await liff.getProfile();
+    if(!profile||typeof profile.userId!=='string'||!profile.userId){lineUserIdNode.textContent='LINEユーザーIDを取得できませんでした。';}
+    else{lineUserId=profile.userId;lineUserIdNode.textContent=lineUserId;copyLineUserIdButton.disabled=false;}
+   }catch(_){lineUserIdNode.textContent='LINEユーザーIDを取得できませんでした。';}
    show('初期化が完了しました。確認するscopeを選択してください。');
   }else{
    lineUserIdNode.textContent='LINEへログインするとユーザーIDを表示します。';
    show('初期化が完了しました。LINEへログイン後、確認するscopeを選択してください。');
   }
- }catch(_){failInitialization('LIFFを初期化またはLINEユーザーIDを取得できませんでした。LINE内ブラウザーまたは通信状態を確認してページを再読み込みしてください。送信していません。');}
+ }catch(_){failInitialization('LIFFを初期化できませんでした。LINE内ブラウザーまたは通信状態を確認してページを再読み込みしてください。送信していません。');}
 }
 copyLineUserIdButton.onclick=async()=>{
  if(!lineUserId)return;
