@@ -33,7 +33,7 @@ function endpointConfigured(){
   try {
     const u=new URL(GAS_ENDPOINT_URL);
     return GAS_ENDPOINT_URL!=='REPLACE_WITH_REVIEWED_ISOLATED_GAS_URL'&&
-      u.protocol==='https:'&&u.hostname.endsWith('.google.com')||false;
+      u.protocol==='https:'&&(u.hostname==='script.google.com'||u.hostname.endsWith('.google.com'));
   } catch(_){return false;}
 }
 function requestId(){
@@ -42,6 +42,7 @@ function requestId(){
   return id;
 }
 async function start(){
+  button.disabled=true;
   if(typeof liff==='undefined'){status.textContent='LINE SDKを読み込めませんでした。';return;}
   try{
     await liff.init({liffId:LIFF_ID});
@@ -55,26 +56,33 @@ async function start(){
   }catch(_){status.textContent='LIFF初期化を確認できませんでした。';}
 }
 button.addEventListener('click',async()=>{
-  if(busy||!endpointConfigured()||!liff.isLoggedIn())return;
+  if(busy||!endpointConfigured()||typeof liff==='undefined'||!liff.isLoggedIn())return;
   busy=true;button.disabled=true;status.textContent='送信結果を確認しています。';
   try{
     const token=liff.getIDToken();
     if(!token)throw new Error('token unavailable');
-    const body=new URLSearchParams({id_token:token,requestId:requestId()});
+    const body=new URLSearchParams({mode:'clock_in',id_token:token,requestId:requestId()});
     const response=await fetch(GAS_ENDPOINT_URL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body,redirect:'follow',credentials:'omit',cache:'no-store'});
     const result=await response.json();
-    if(result.outcome==='RECORDED'||result.outcome==='DUPLICATE_REQUEST'){
+    if(result.outcome==='CLOCK_IN_RECORDED'){
       sessionStorage.removeItem(PENDING_KEY);
-      status.textContent=result.outcome==='RECORDED'?'出勤イベントを記録しました。':'同じ操作は記録済みです。';
-    }else if(result.outcome==='FORBIDDEN'){
-      status.textContent='この利用者は試験対象として登録されていません。';
+      status.textContent='出勤イベントを記録しました。';
+    }else if(result.outcome==='ALREADY_RECORDED'){
+      sessionStorage.removeItem(PENDING_KEY);
+      status.textContent='同じ操作は記録済みです。';
+    }else if(result.outcome==='REQUEST_ID_CONFLICT'){
+      status.textContent='操作IDが別の出勤記録に使われています。管理者へお問い合わせください。';
+    }else if(result.outcome==='AUTHORIZATION_DENIED'||result.outcome==='UNREGISTERED'){
+      status.textContent='この利用者は出勤を記録できません。';
     }else if(result.outcome==='AUTHENTICATION_FAILED'){
       status.textContent='本人確認に失敗しました。';
+    }else if(result.outcome==='CLOCK_IN_UNAVAILABLE'){
+      status.textContent='記録先を利用できません。再試行では同じ操作IDを使います。';
     }else{
-      status.textContent='結果を確定できません。再試行する場合、同じ操作IDを使います。';
+      status.textContent='結果を確定できません。再試行では同じ操作IDを使います。';
     }
   }catch(_){status.textContent='応答を確認できません。再試行では同じ操作IDを使います。';}
-  finally{busy=false;button.disabled=false;}
+  finally{busy=false;button.disabled=!endpointConfigured();}
 });
 start();
 })();
