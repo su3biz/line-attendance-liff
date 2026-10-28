@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ブラウザPOST 404 切り分け診断</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      max-width: 44rem;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      color: #182230;
+      font: 16px/1.7 system-ui, sans-serif;
+    }
+    h1 { line-height: 1.3; }
+    .notice {
+      margin: 1.25rem 0;
+      padding: 1rem;
+      border-left: 4px solid #b54708;
+      background: #fffaeb;
+    }
+    .note { color: #475467; }
+    button {
+      width: 100%;
+      margin: 1rem 0;
+      padding: .8rem 1rem;
+      border: 0;
+      border-radius: .4rem;
+      background: #175cd3;
+      color: white;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:disabled { opacity: .6; cursor: wait; }
+    [role="status"] { min-height: 1.7em; }
+    code { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <h1>ブラウザPOST 404 切り分け診断</h1>
+
+  <p>このページは、参照元情報を明示的に抑止しない状態で、固定ダミーデータを隔離GASへフォームPOSTする診断専用ページです。実LINE IDトークンは取得も送信もしません。LIFF SDKも使用しません。</p>
+
+  <div class="notice">
+    <strong>送信するとこのページから移動します。</strong>
+    <p>送信先の応答画面へページ遷移します。元のページに戻れない場合があります。画面遷移や「送信開始」の表示だけでは、GASへの到達や <code>doPost</code> の実行を確認できません。GASの実行履歴で確認してください。</p>
+  </div>
+
+  <h2>この診断で送る項目</h2>
+  <ul>
+    <li><code>id_token</code>: <code>DUMMY_TOKEN_</code> + <code>A</code> 120文字</li>
+    <li><code>mode</code>: <code>identity</code></li>
+    <li><code>employeeId</code>: <code>EMP-A</code></li>
+    <li><code>role</code>: <code>employee</code></li>
+  </ul>
+  <p class="note">送信は <code>application/x-www-form-urlencoded</code> のHTMLフォームPOSTです。このページには <code>no-referrer</code> の指定を置いていません。参照元ヘッダーの変化が確認できても、それだけで404の原因が確定するわけではありません。<code>Origin</code> はブラウザが決めるため、この変更で <code>Origin: null</code> が必ず解消するとは限りません。</p>
+
+  <button id="send-diagnostic" type="button">固定ダミーで診断POSTを開始</button>
+  <p id="status" role="status" aria-live="polite"></p>
+
+  <form id="diagnostic-form" method="post" enctype="application/x-www-form-urlencoded" hidden>
+    <input type="hidden" name="id_token">
+    <input type="hidden" name="mode" value="identity">
+    <input type="hidden" name="employeeId" value="EMP-A">
+    <input type="hidden" name="role" value="employee">
+  </form>
+
+  <p class="note">テスト結果を共有する場合は、DevToolsのCookie、Authorization、トークンを含めないでください。HTTPステータス、Request Method、Content-Type、Origin、Refererの有無だけを確認してください。</p>
+
+  <script>
+    const GAS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbyYF3M3h3-0SirlvBP24vGW42HC1IAlzm-b9rVLl2JzWuSNmgzlO9OP1f3CGCZdUVmj/exec';
+    const form = document.getElementById('diagnostic-form');
+    const button = document.getElementById('send-diagnostic');
+    const status = document.getElementById('status');
+
+    button.addEventListener('click', () => {
+      const confirmed = window.confirm(
+        '固定のダミーデータだけを隔離GASへフォームPOSTします。\n' +
+        '送信するとこのページを離れます。送信開始はGAS到達の確認ではありません。\n\n' +
+        '続行しますか？'
+      );
+      if (!confirmed) {
+        status.textContent = '送信を中止しました。';
+        return;
+      }
+
+      form.action = GAS_ENDPOINT;
+      form.elements.id_token.value = 'DUMMY_TOKEN_' + 'A'.repeat(120);
+      button.disabled = true;
+      status.textContent = '固定ダミーによるPOSTを開始します。GASへの到達は実行履歴で確認してください。';
+      form.submit();
+    });
+  </script>
+</body>
+</html>
