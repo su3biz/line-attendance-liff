@@ -71,7 +71,7 @@
           }
 
           // Only fixed, explicitly permitted codes may reach the screen.
-          var allowedOutcomes = ['TRANSPORT_PING_OK'];
+          var allowedOutcomes = ['TRANSPORT_PING_OK', 'INVALID_REQUEST'];
           var outcome = payload && typeof payload === 'object' &&
             typeof payload.outcome === 'string' &&
             allowedOutcomes.indexOf(payload.outcome) !== -1
