@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow">
+  <title>STEP 15 通信経路確認</title>
+  <style>
+    body { font: 16px/1.6 system-ui,sans-serif; margin: 2rem auto; max-width: 42rem; padding: 0 1rem; color: #17202a; }
+    label, input, button { display: block; width: 100%; box-sizing: border-box; }
+    input, button { font: inherit; min-height: 2.8rem; margin-top: .5rem; }
+    button { cursor: pointer; }
+    #result { white-space: pre-wrap; overflow-wrap: anywhere; padding: 1rem; background: #f3f5f7; }
+  </style>
+</head>
+<body>
+  <h1>STEP 15 通信経路確認</h1>
+  <p>LINE IDトークンや個人情報を送らず、固定の疎通マーカーだけを検証用GASへ送ります。</p>
+  <button id="send" type="button">固定マーカーを1回送る</button>
+  <p id="result" role="status" aria-live="polite">未実行</p>
+  <script>
+    'use strict';
+    (function () {
+      var endpoint = 'https://script.google.com/macros/s/AKfycbxMj-f5HNWg0Q7BqEq41w-14nDJiQPXekE_CWd1mJgrXLJG2XUuws-4QWFRyyZ7Z9nJ/exec';
+      var button = document.getElementById('send');
+      var result = document.getElementById('result');
+
+      button.addEventListener('click', async function () {
+        button.disabled = true;
+        result.textContent = '固定マーカーを送信しています…';
+
+        try {
+          var url = new URL(endpoint);
+          if (url.protocol !== 'https:' ||
+              url.hostname !== 'script.google.com' ||
+              !/^\/macros\/s\/[^/]+\/exec\/?$/.test(url.pathname) ||
+              url.search || url.hash) {
+            throw new Error('invalid endpoint');
+          }
+
+          var bytes = new Uint8Array(16);
+          crypto.getRandomValues(bytes);
+          var probeId = 'step15-' + Array.from(bytes, function (b) {
+            return b.toString(16).padStart(2, '0');
+          }).join('');
+          var body = new URLSearchParams({
+            action: 'transport_ping',
+            probeId: probeId
+          });
+
+          // URL-encoded POST is a CORS-safelisted content type: no preflight.
+          // A CORS/network error does not prove that GAS failed to receive it.
+          var response = await fetch(url.href, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+            body: body,
+            credentials: 'omit',
+            cache: 'no-store',
+            redirect: 'follow'
+          });
+          var payload = await response.json();
+          if (payload && payload.outcome === 'TRANSPORT_PING_OK') {
+            result.textContent =
+              'GAS応答をブラウザで読めました（TRANSPORT_PING_OK）。受信ログも別途確認してください。';
+          } else {
+            result.textContent =
+              '応答は読めましたが、期待した固定応答ではありません。成功とは判定しません。';
+          }
+        } catch (_) {
+          result.textContent =
+            'ブラウザでは応答を確認できませんでした。GAS実行履歴に固定の受信マーカーがあるかを確認してください。これだけでは送信失敗とも成功とも判定できません。';
+        } finally {
+          button.disabled = false;
+        }
+      });
+    }());
+  </script>
+</body>
+</html>
