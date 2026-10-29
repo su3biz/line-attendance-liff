@@ -56,7 +56,9 @@ async function start(){
       status.textContent='送信先未設定のため停止中です。公開ページからは送信できません。';
       return;
     }
-    status.textContent='隔離試験先が設定されています。本人の出勤操作を行う場合のみ押してください。';
+    status.textContent=sessionStorage.getItem(PENDING_KEY)
+      ?'結果未確定の操作があります。必要な場合は同じ操作IDで再試行してください。'
+      :'本人の出勤操作を行う場合のみ押してください。';
     button.disabled=false;
   }catch(_){status.textContent='LIFF初期化を確認できませんでした。';}
 }
@@ -82,12 +84,17 @@ button.addEventListener('click',async()=>{
     }else if(result.outcome==='AUTHENTICATION_FAILED'){
       status.textContent='本人確認に失敗しました。';
     }else if(result.outcome==='CLOCK_IN_UNAVAILABLE'){
-      status.textContent='記録先を利用できません。再試行では同じ操作IDを使います。';
+      status.textContent='記録先を利用できません。必要な場合は同じ操作IDで再試行してください。';
     }else{
-      status.textContent='結果を確定できません。再試行では同じ操作IDを使います。';
+      status.textContent='結果を確定できません。必要な場合は同じ操作IDで再試行してください。';
     }
-  }catch(_){status.textContent='応答を確認できません。再試行では同じ操作IDを使います。';}
-  finally{busy=false;button.disabled=sessionStorage.getItem(COMPLETED_KEY)==='true'||!endpointConfigured();}
+  }catch(_){status.textContent='応答を確認できません。必要な場合は同じ操作IDで再試行してください。';}
+  finally{
+    busy=false;
+    const completed=sessionStorage.getItem(COMPLETED_KEY)==='true';
+    button.disabled=completed||!endpointConfigured();
+    if(!completed&&endpointConfigured())button.textContent='同じ操作IDで再確認';
+  }
 });
 start();
 })();
