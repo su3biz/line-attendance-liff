@@ -26,6 +26,7 @@ button:disabled{opacity:.5}.muted{color:#53616b;font-size:.92rem}
 const LIFF_ID='2012227652-CgVMkyBb';
 const GAS_ENDPOINT_URL='REPLACE_WITH_REVIEWED_ISOLATED_GAS_URL';
 const PENDING_KEY='isolated-clock-in-request-id-v1';
+const COMPLETED_KEY='isolated-clock-in-completed-v1';
 const status=document.getElementById('status');
 const button=document.getElementById('clock-in');
 let busy=false;
@@ -47,6 +48,10 @@ async function start(){
   try{
     await liff.init({liffId:LIFF_ID});
     if(!liff.isLoggedIn()){status.textContent='LINEログインが必要です。LINEアプリ内で開き直してください。';return;}
+    if(sessionStorage.getItem(COMPLETED_KEY)==='true'){
+      status.textContent='この画面では出勤操作を記録済みです。';
+      return;
+    }
     if(!endpointConfigured()){
       status.textContent='送信先未設定のため停止中です。公開ページからは送信できません。';
       return;
@@ -65,10 +70,10 @@ button.addEventListener('click',async()=>{
     const response=await fetch(GAS_ENDPOINT_URL,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'},body,redirect:'follow',credentials:'omit',cache:'no-store'});
     const result=await response.json();
     if(result.outcome==='CLOCK_IN_RECORDED'){
-      sessionStorage.removeItem(PENDING_KEY);
+      sessionStorage.setItem(COMPLETED_KEY,'true');
       status.textContent='出勤イベントを記録しました。';
     }else if(result.outcome==='ALREADY_RECORDED'){
-      sessionStorage.removeItem(PENDING_KEY);
+      sessionStorage.setItem(COMPLETED_KEY,'true');
       status.textContent='同じ操作は記録済みです。';
     }else if(result.outcome==='REQUEST_ID_CONFLICT'){
       status.textContent='操作IDが別の出勤記録に使われています。管理者へお問い合わせください。';
@@ -82,7 +87,7 @@ button.addEventListener('click',async()=>{
       status.textContent='結果を確定できません。再試行では同じ操作IDを使います。';
     }
   }catch(_){status.textContent='応答を確認できません。再試行では同じ操作IDを使います。';}
-  finally{busy=false;button.disabled=!endpointConfigured();}
+  finally{busy=false;button.disabled=sessionStorage.getItem(COMPLETED_KEY)==='true'||!endpointConfigured();}
 });
 start();
 })();
