@@ -59,17 +59,33 @@
             cache: 'no-store',
             redirect: 'follow'
           });
-          var payload = await response.json();
-          if (payload && payload.outcome === 'TRANSPORT_PING_OK') {
-            result.textContent =
-              'GAS応答をブラウザで読めました（TRANSPORT_PING_OK）。受信ログも別途確認してください。';
+          var status = Number.isInteger(response.status) && response.status >= 100 && response.status <= 599
+            ? String(response.status) : '取得不可';
+          var prefix = 'HTTPステータス: ' + status + '\n';
+          var payload;
+          try {
+            payload = await response.json();
+          } catch (_) {
+            result.textContent = prefix + 'JSON以外の応答、またはJSONを読み取れませんでした。成功とは判定しません。';
+            return;
+          }
+
+          // Only fixed, explicitly permitted codes may reach the screen.
+          var allowedOutcomes = ['TRANSPORT_PING_OK', 'INVALID_REQUEST'];
+          var outcome = payload && typeof payload === 'object' &&
+            typeof payload.outcome === 'string' &&
+            allowedOutcomes.indexOf(payload.outcome) !== -1
+            ? payload.outcome : '表示対象外または未取得';
+          var diagnostic = prefix + 'outcome: ' + outcome + '\n';
+          if (outcome === 'TRANSPORT_PING_OK') {
+            result.textContent = diagnostic + '固定応答をブラウザで読めました。';
           } else {
-            result.textContent =
+            result.textContent = diagnostic +
               '応答は読めましたが、期待した固定応答ではありません。成功とは判定しません。';
           }
         } catch (_) {
           result.textContent =
-            'ブラウザでは応答を確認できませんでした。GAS実行履歴に固定の受信マーカーがあるかを確認してください。これだけでは送信失敗とも成功とも判定できません。';
+            '通信エラーまたは送信準備エラーのため、ブラウザでは応答を確認できませんでした。送信の成否は判定できません。';
         } finally {
           button.disabled = false;
         }
