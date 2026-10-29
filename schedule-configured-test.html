@@ -2,8 +2,7 @@
 <script>
 'use strict';
 // Set these only in a separately reviewed test deployment, not in a public commit.
-const LIFF_ID = 'REPLACE_WITH_TEST_LIFF_ID';
-const GAS_URL = 'REPLACE_WITH_ISOLATED_GAS_EXEC_URL';
+let LIFF_ID = '', GAS_URL = '';
 let token='', busy=false;
 const status=document.getElementById('status'), list=document.getElementById('list'), reload=document.getElementById('reload');
 const messages={REGISTRATION_INVALID:'登録コードを確認できません。',ALREADY_REGISTERED:'このLINEアカウントは登録済みです。',DISABLED:'機能が停止中です。',AUTHENTICATION_FAILED:'LINE本人確認に失敗しました。',AUTHORIZATION_DENIED:'利用者設定を確認できません。',NOT_FOUND:'対象の予定を確認できません。',CONFLICT:'他の操作で更新されました。再読み込みしてください。',UNAVAILABLE:'処理できませんでした。管理者に確認してください。',INVALID_REQUEST:'入力を確認してください。'};
