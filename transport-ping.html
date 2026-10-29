@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex,nofollow">
+  <title>LINE勤怠MVP POST通信確認</title>
+  <style>
+    :root { color-scheme: light; font: 16px/1.65 system-ui, sans-serif; color: #182230; background: #f4f7fa; }
+    body { margin: 0; padding: 22px 14px; }
+    main { max-width: 42rem; margin: 0 auto; }
+    section { background: #fff; border: 1px solid #d9e1e8; border-radius: 12px; padding: 20px; margin: 14px 0; }
+    h1 { font-size: 1.3rem; margin: 0 0 10px; }
+    p { margin: .65rem 0; }
+    label { display: block; font-weight: 650; margin: 12px 0 6px; }
+    input, button { box-sizing: border-box; width: 100%; min-height: 46px; padding: 10px 12px; font: inherit; }
+    input { border: 1px solid #aab6c2; border-radius: 7px; }
+    button { margin-top: 16px; border: 0; border-radius: 7px; background: #1769aa; color: #fff; font-weight: 700; }
+    .muted { color: #526170; font-size: .94rem; }
+    code { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+<main>
+  <section>
+    <h1>LINE勤怠MVP POST通信確認</h1>
+    <p>隔離GASの <code>transport_ping</code> に固定形式のPOSTを1回送る画面です。</p>
+    <p class="muted">LINEログイン、IDトークン、プロフィール、勤怠情報は使いません。打刻やスプレッドシート書き込みも行いません。送信後、GASの応答ページへ移動します。</p>
+  </section>
+  <section>
+    <form id="probe-form" method="post" target="_top">
+      <label for="endpoint">STEP34結合試験専用GASのウェブアプリURL（/exec）</label>
+      <input id="endpoint" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" required placeholder="https://script.google.com/macros/s/.../exec">
+      <input type="hidden" name="action" value="transport_ping">
+      <input type="hidden" name="probeId" id="probe-id">
+      <button type="submit">transport_ping を送信</button>
+    </form>
+    <p class="muted">送信データは action と、画面内で作る <code>step13-</code>＋32桁の16進数だけです。送信先は script.google.com の /macros/s/.../exec に限ります。</p>
+  </section>
+</main>
+<script>
+(() => {
+  'use strict';
+  const form = document.getElementById('probe-form');
+  const endpoint = document.getElementById('endpoint');
+  const probeId = document.getElementById('probe-id');
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    let url;
+    try { url = new URL(endpoint.value.trim()); }
+    catch (_) { window.alert('URLの形式を確認してください。'); return; }
+    if (url.protocol !== 'https:' || url.hostname !== 'script.google.com' ||
+        !/^\/macros\/s\/[^/]+\/exec\/?$/.test(url.pathname) ||
+        url.username || url.password || url.search || url.hash) {
+      window.alert('https://script.google.com/macros/s/.../exec の形式で入力してください。');
+      return;
+    }
+    if (typeof crypto === 'undefined' || !crypto.getRandomValues) {
+      window.alert('このブラウザーで安全な試験IDを作れないため、送信しませんでした。');
+      return;
+    }
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    probeId.value = 'step13-' + hex;
+    form.action = url.href;
+    if (!window.confirm('入力したSTEP34結合試験専用GASへ、action=transport_ping と固定形式のprobeIdだけをPOSTします。トークンや勤怠データは送信しません。続行しますか？')) {
+      event.preventDefault();
+      return;
+    }
+    form.submit();
+  });
+})();
+</script>
+</body>
+</html>
+
