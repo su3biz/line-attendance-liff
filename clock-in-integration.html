@@ -41,7 +41,7 @@
 
           var bytes = new Uint8Array(16);
           crypto.getRandomValues(bytes);
-          var probeId = 'step15-' + Array.from(bytes, function (b) {
+          var probeId = 'step13-' + Array.from(bytes, function (b) {
             return b.toString(16).padStart(2, '0');
           }).join('');
           var body = new URLSearchParams({
