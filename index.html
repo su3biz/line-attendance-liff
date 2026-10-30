@@ -15,7 +15,8 @@
 <main>
 <h1>勤務予定・実績</h1>
 <p>テスト用シフトを確認し、実際の勤務時間を勤怠表へ保存します。</p>
-<p class="muted">試験日: 2026年10月1日（シフト表の1日欄。日付は固定）</p>
+<label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" value="2026-10-01" required></label>
+<p class="muted">基準日: 2026-10-01</p>
 <p class="muted">シフト表が空欄の従業員は表示されません。</p>
 <p id="status" role="status" aria-live="polite">LINEに接続しています…</p>
 <form id="enrollment" hidden>
@@ -30,13 +31,14 @@
 const LIFF_ID='2012227652-CgVMkyBb';
 const GAS_URL='https://script.google.com/macros/s/AKfycbxzZqjeGmQ-npCzdnNzJ0G8NiIxLBoV4wzoys3iufXLMlkbB0CvntBo3F8xEpL4rAzK/exec';
 let token='',busy=false;
-const status=document.getElementById('status'),list=document.getElementById('list'),reload=document.getElementById('reload');
+const status=document.getElementById('status'),list=document.getElementById('list'),reload=document.getElementById('reload'),workDateInput=document.getElementById('workDate');
+const BASE_DATE='2026-10-01';
 const messages={REGISTRATION_INVALID:'登録コードを確認できません。',ALREADY_REGISTERED:'このLINEアカウントは登録済みです。',DISABLED:'機能が停止中です。',AUTHENTICATION_FAILED:'LINE本人確認に失敗しました。',AUTHORIZATION_DENIED:'利用者設定を確認できません。',NOT_FOUND:'対象の勤務予定を確認できません。',CONFLICT:'別の操作で更新されています。シフトを再読み込みしてください。',UNAVAILABLE:'保存結果を確認できません。二重保存を避けるため再保存せず、勤怠表と変更履歴を確認してください。',SAVE_UNKNOWN:'保存結果を確定できません。二重保存を避けるため再保存せず、勤怠表と変更履歴を確認してください。',INVALID_REQUEST:'入力時刻を確認してください。'};
 async function api(fields){const body=new URLSearchParams({id_token:token,...fields});const r=await fetch(GAS_URL,{method:'POST',body,redirect:'follow',referrerPolicy:'no-referrer'});if(!r.ok)throw Error('通信結果を確認できません。');const result=await r.json();if(!result.ok){const message=result.code==='UNAVAILABLE'&&fields.action!=='saveActual'?'勤怠情報を読み込めませんでした。再読み込みしてください。':(messages[result.code]||'処理できませんでした。');const e=Error(message);e.code=result.code;throw e;}return result;}
 function rangeText(start,end,next){return start+'–'+end+(next?'（翌日）':'');}
 function render(records){
  list.replaceChildren();
- if(!records.length){list.textContent='この日（1日）に勤務予定はありません。';return;}
+ if(!records.length){list.textContent='この日に勤務予定はありません。';return;}
  for(const row of records){
   const card=document.createElement('article');
   const title=document.createElement('h2');title.textContent=row.displayName;card.appendChild(title);
@@ -55,7 +57,7 @@ function render(records){
   const button=document.createElement('button');button.textContent='実績を勤怠表へ保存';form.appendChild(button);
   form.addEventListener('submit',async e=>{
    e.preventDefault();if(busy)return;busy=true;button.disabled=true;reload.disabled=true;
-   try{await api({action:'saveActual',employeeId:row.employeeId,actualStart:fields[0].value,actualEnd:fields[1].value,revision:String(row.revision)});const refreshed=await load(false,true);status.textContent=refreshed?'実績を保存し、勤怠表と変更履歴を再取得しました。':'実績は保存されましたが、画面の再取得に失敗しました。再保存せず、勤怠表を確認してください。';}
+   try{await api({action:'saveActual',employeeId:row.employeeId,workDate:workDateInput.value,actualStart:fields[0].value,actualEnd:fields[1].value,revision:String(row.revision)});const refreshed=await load(false,true);status.textContent=refreshed?'実績を保存し、勤怠表と変更履歴を再取得しました。':'実績は保存されましたが、画面の再取得に失敗しました。再保存せず、勤怠表を確認してください。';}
    catch(err){const refreshed=await load(false,true);const saved=refreshed&&refreshed.records.some(x=>x.employeeId===row.employeeId&&x.saved&&x.revision>row.revision&&x.actualStart===fields[0].value&&x.actualEnd===fields[1].value);if(saved)status.textContent='保存済みであることを再取得で確認しました。';else if(refreshed)status.textContent=err.message+' 再保存せず、勤怠表と変更履歴を確認してください。';else status.textContent='保存結果を確認できません。二重保存を避けるため再保存せず、勤怠表と変更履歴を確認してください。';}
    finally{busy=false;button.disabled=false;reload.disabled=false;}
   });
@@ -63,7 +65,7 @@ function render(records){
  }
 }
 async function load(show=true,preserveOnError=false){
- try{const data=await api({action:'attendanceList'});render(data.records);if(show)status.textContent='シフトを表示しています。保存すると実績として勤怠表に反映します。';return data;}
+ try{if(!workDateInput.value||workDateInput.value<BASE_DATE){status.textContent='勤怠日は2026-10-01以降を選択してください。';return null;}const data=await api({action:'attendanceList',workDate:workDateInput.value});render(data.records);if(show)status.textContent='シフトを表示しています。保存すると実績として勤怠表に反映します。';return data;}
  catch(e){if(!preserveOnError)list.replaceChildren();if(e.code==='AUTHORIZATION_DENIED')document.getElementById('enrollment').hidden=false;status.textContent=e.message;return null;}
 }
 document.getElementById('enrollment').addEventListener('submit',async e=>{
@@ -72,7 +74,9 @@ document.getElementById('enrollment').addEventListener('submit',async e=>{
  catch(err){input.value='';status.textContent=err.message+' 登録結果が不明な場合は管理者に確認してください。';}
  finally{busy=false;}
 });
-reload.addEventListener('click',async()=>{if(busy)return;busy=true;reload.disabled=true;try{await load();}finally{busy=false;reload.disabled=false;}});
+async function reloadSelectedDate(){if(busy)return;busy=true;reload.disabled=true;try{await load();}finally{busy=false;reload.disabled=false;}}
+reload.addEventListener('click',reloadSelectedDate);
+workDateInput.addEventListener('change',reloadSelectedDate);
 async function start(){
  try{await liff.init({liffId:LIFF_ID});if(!liff.isLoggedIn()){liff.login();return;}token=liff.getIDToken()||'';if(!token)throw Error('LINE本人確認情報を取得できません。');await load();reload.disabled=false;}
  catch(e){status.textContent=e.message||'接続できませんでした。';}
