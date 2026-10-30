@@ -16,7 +16,7 @@
 <h1>勤務予定・実績</h1>
 <p>テスト用シフトを確認し、実際の勤務時間を勤怠表へ保存します。</p>
 <label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" value="2026-10-01" required></label>
-<p class="muted">基準日: 2026-10-01</p>
+
 
 <p id="status" role="status" aria-live="polite">LINEに接続しています…</p>
 <form id="enrollment" hidden>
@@ -75,6 +75,7 @@ document.getElementById('enrollment').addEventListener('submit',async e=>{
  finally{busy=false;}
 });
 async function reloadSelectedDate(){if(busy)return;busy=true;reload.disabled=true;try{await load();}finally{busy=false;reload.disabled=false;}}
+// 日付変更と再読み込みボタンは同じ再取得処理を実行する。
 reload.addEventListener('click',reloadSelectedDate);
 workDateInput.addEventListener('change',reloadSelectedDate);
 async function start(){
