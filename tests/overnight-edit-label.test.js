@@ -46,7 +46,7 @@ assert.equal(endCaption.textContent,'終了');
 start.value='22:00';start.handlers.input();
 assert.equal(endCaption.textContent,'終了（翌日）');
 start.value='09:00';end.value='17:00';end.handlers.input();
-assert.equal(endLabel.textContent,'終了 ');
+assert.equal(endCaption.textContent,'終了');
 assert.deepEqual(Array.from(vm.runInContext("dirty",context)),[]);
 assert.equal(endLabel.children[1],end,'end input remains attached after normal reset');
 console.log('PASS: edit-form overnight label follows start/end inputs and clears when restored');
