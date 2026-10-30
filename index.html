@@ -45,11 +45,11 @@ function render(records){
   const form=document.createElement('form');
   const fields=[];
   for(const [caption,value,next] of [['実績開始',row.actualStart,false],['実績終了',row.actualEnd,row.actualEndNextDay]]){
-   const label=document.createElement('label');label.append(document.createTextNode(caption+(next?'（翌日）':'')+' '));
+   const label=document.createElement('label');label.append(document.createTextNode(caption+' '));
    const input=document.createElement('input');input.type='time';input.required=true;input.value=value;label.appendChild(input);form.appendChild(label);fields.push(input);
   }
   const endCaption=form.querySelectorAll('label')[1].firstChild;
-  const refreshEndCaption=()=>{endCaption.textContent='実績終了'+(fields[0].value&&fields[1].value&&fields[1].value<=fields[0].value?'（翌日）':'')+' ';};
+  const refreshEndCaption=()=>{endCaption.textContent='実績終了 ';};
   fields.forEach(x=>x.addEventListener('input',refreshEndCaption));
   if(row.saved){const saved=document.createElement('p');saved.className='muted';saved.textContent='保存済み・変更履歴 '+row.revision+' 件';card.appendChild(saved);}
   const button=document.createElement('button');button.textContent='実績を勤怠表へ保存';form.appendChild(button);
