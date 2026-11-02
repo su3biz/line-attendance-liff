@@ -95,7 +95,7 @@ async function load(show=true,preserveOnError=false){
   const data=await api({action:'attendanceList',workDate:selectedDate});
   if(sequence!==requestSequence||selectedDate!==workDateInput.value)return null;
   enrollmentPanel.hidden=true;attendancePanel.hidden=false;render(data.records);
-  if(show)status.textContent=data.records.length?'勤怠実績が登録されている場合は登録済みの勤務時間を表示しています。未登録の場合はシフト表の予定時間を表示しています。':'この日の勤務予定はありません。';
+  if(show)status.textContent=data.records.length?data.records.length+'名分の勤務予定・実績を表示しています。':'この日の勤務予定はありません。';
   return data;
  }catch(e){
   if(sequence!==requestSequence||selectedDate!==workDateInput.value)return null;
@@ -120,7 +120,6 @@ document.getElementById('enrollment').addEventListener('submit',async e=>{
  finally{setLoading(false);busy=false;button.disabled=false;input.disabled=false;}
 });
 document.getElementById('retry').addEventListener('click',()=>{if(!busy)load();});
-retry.addEventListener('keydown',e=>{if(e.key==='Enter'&&!busy)load();});
 workDateInput.addEventListener('change',()=>{if(!busy)load();});
 async function start(){
  setLoading(true,'LINEに接続しています…');
