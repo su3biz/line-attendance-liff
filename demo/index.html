@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <meta name="robots" content="noindex,nofollow">
-<title>勤務予定・実績</title>
+<title>LINE勤怠</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
 :root{font-family:system-ui,sans-serif;color:#202b26;background:#f4f7f5}body{margin:0}main{max-width:680px;margin:auto;padding:20px}article{background:#fff;border-radius:12px;padding:16px;margin:12px 0}label{display:block;margin:12px 0}input,button{font:inherit;padding:10px}button{background:#06a94d;color:#fff;border:0;border-radius:8px;min-height:44px}button:disabled{opacity:.5}[hidden]{display:none!important}#status,#enrollmentStatus,#connectionErrorMessage{white-space:pre-wrap}.muted{color:#58645e;font-size:.95rem}.times{font-weight:600}.nextday{font-size:.9em;color:#58645e}
@@ -30,11 +30,10 @@
 <section id="attendancePanel" hidden>
 <section id="connectionError" role="alert" hidden><h1>通信エラーが発生しました。</h1><p id="connectionErrorMessage"></p><button id="retry" type="button">再接続</button></section>
 <h1>勤務予定・実績</h1>
-<p>テスト用シフトを確認し、実際の勤務時間を勤怠表へ保存します。</p>
+<p>勤務日と勤務時間を確認し、実際に働いた時間を入力してください。<br>保存すると、勤怠表に反映されます。</p>
 <label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" value="2026-10-01" required></label>
 <p class="muted">勤怠実績が登録されている場合は、登録済みの勤務時間を表示します。<br>未登録の場合は、シフト表の予定時間を表示します。</p>
 <p id="status" role="status" aria-live="polite"></p>
-<button id="reload" type="button">シフトを再読み込み</button>
 <div id="list"></div>
 </section>
 <div id="loading" role="status" aria-live="polite" aria-atomic="true" hidden>
@@ -43,15 +42,14 @@
 </main>
 <script>
 'use strict';
-const LIFF_ID='2012227652-aPqnxqOi'; // DEMO LIFF
-const GAS_URL='https://script.google.com/macros/s/AKfycbzdMHPEqF1b2fHhH2y-li0tO4KVH9FWwQtbBH2ozpJpHtEiSDRdnNvt2K2J7ABLRUmF4A/exec'; // DEMO deployment
+const LIFF_ID='2012227652-aPqnxqOi';
+const GAS_URL='https://script.google.com/macros/s/AKfycbzdMHPEqF1b2fHhH2y-li0tO4KVH9FWwQtbBH2ozpJpHtEiSDRdnNvt2K2J7ABLRUmF4A/exec';
 let token='',busy=false,requestSequence=0,liffReady=false,liffInitPromise=null;
 const app=document.getElementById('app');
 const status=document.getElementById('status');
 const enrollmentStatus=document.getElementById('enrollmentStatus');
 const list=document.getElementById('list');
 const retry=document.getElementById('retry');
-const reload=document.getElementById('reload');
 const connectionError=document.getElementById('connectionError');
 const connectionErrorMessage=document.getElementById('connectionErrorMessage');
 const loading=document.getElementById('loading');
@@ -73,7 +71,7 @@ function clearConnectionError(){attendancePanel.classList.remove('connection-err
 function rangeText(start,end,next){return start+'–'+end+(next?'（翌日）':'');}
 function render(records){
  list.replaceChildren();
- if(!records.length){list.textContent='シフト表が空欄の従業員は表示されません。';return;}
+ if(!records.length){list.textContent='この日の勤務予定はありません。';return;}
  for(const row of records){
   const card=document.createElement('article');
   const title=document.createElement('h2');title.textContent=row.displayName;card.appendChild(title);
@@ -88,12 +86,12 @@ function render(records){
   if(row.saved){const saved=document.createElement('p');saved.className='muted';saved.textContent='保存済み・変更履歴 '+row.revision+' 件';card.appendChild(saved);}
   const button=document.createElement('button');button.textContent='実績を勤怠表へ保存';form.appendChild(button);
   form.addEventListener('submit',async e=>{
-   e.preventDefault();if(busy)return;busy=true;button.disabled=true;workDateInput.disabled=true;retry.disabled=true;reload.disabled=true;
+   e.preventDefault();if(busy)return;busy=true;button.disabled=true;workDateInput.disabled=true;retry.disabled=true;
    const saveDate=workDateInput.value;
    setLoading(true,'勤怠情報を保存しています…');
    try{await api({action:'saveActual',employeeId:row.employeeId,workDate:saveDate,actualStart:fields[0].value,actualEnd:fields[1].value,revision:String(row.revision)});const refreshed=await load(false,true);status.textContent=refreshed?'実績を保存し、勤怠表と変更履歴を再取得しました。':'実績は保存されましたが、画面の再取得に失敗しました。再保存せず、勤怠表を確認してください。';}
    catch(err){const refreshed=await load(false,true);const saved=refreshed&&refreshed.records.some(x=>x.employeeId===row.employeeId&&x.saved&&x.revision>row.revision&&x.actualStart===fields[0].value&&x.actualEnd===fields[1].value);if(saved){clearConnectionError();status.textContent='保存済みであることを再取得で確認しました。';}else if(err.code==='SAVE_FAILED'){clearConnectionError();status.textContent=err.message;}else{showConnectionError(SAVE_UNKNOWN_ERROR);}}
-   finally{busy=false;button.disabled=false;workDateInput.disabled=false;retry.disabled=false;reload.disabled=false;}
+   finally{busy=false;button.disabled=false;workDateInput.disabled=false;retry.disabled=false;}
   });
   card.appendChild(form);list.appendChild(card);
  }
@@ -131,7 +129,6 @@ document.getElementById('enrollment').addEventListener('submit',async e=>{
  finally{setLoading(false);busy=false;button.disabled=false;input.disabled=false;}
 });
 document.getElementById('retry').addEventListener('click',()=>{if(busy)return;if(liffReady)load();else start();});
-document.getElementById('reload').addEventListener('click',()=>{if(!busy)load();});
 workDateInput.addEventListener('change',()=>{if(!busy)load();});
 async function initializeLiff(){
  if(!liffInitPromise){
