@@ -8,9 +8,10 @@
 <title>LINE勤怠</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
-:root{font-family:system-ui,sans-serif;color:#202b26;background:#f4f7f5}body{margin:0}main{max-width:680px;margin:auto;padding:20px}article{background:#fff;border-radius:12px;padding:16px;margin:12px 0}label{display:block;margin:12px 0}input,button{font:inherit;padding:10px}button{background:#06a94d;color:#fff;border:0;border-radius:8px;min-height:44px}button:disabled{opacity:.5}[hidden]{display:none!important}#status,#enrollmentStatus{white-space:pre-wrap}.muted{color:#58645e;font-size:.95rem}.times{font-weight:600}.nextday{font-size:.9em;color:#58645e}
+:root{font-family:system-ui,sans-serif;color:#202b26;background:#f4f7f5}body{margin:0}main{max-width:680px;margin:auto;padding:20px}article{background:#fff;border-radius:12px;padding:16px;margin:12px 0}label{display:block;margin:12px 0}input,button{font:inherit;padding:10px}button{background:#06a94d;color:#fff;border:0;border-radius:8px;min-height:44px}button:disabled{opacity:.5}[hidden]{display:none!important}#status,#enrollmentStatus,#connectionErrorMessage{white-space:pre-wrap}.muted{color:#58645e;font-size:.95rem}.times{font-weight:600}.nextday{font-size:.9em;color:#58645e}
 #loading{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:#fff;padding:20px}
 .loading-card{background:#fff;border-radius:12px;padding:24px;min-width:220px;text-align:center;box-shadow:0 4px 24px #0003}
+#attendancePanel.connection-error > :not(#connectionError){display:none!important}
 .spinner{width:28px;height:28px;margin:0 auto 12px;border:4px solid #dce6df;border-top-color:#06a94d;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
@@ -27,12 +28,12 @@
 <p id="enrollmentStatus" role="status" aria-live="polite"></p>
 </section>
 <section id="attendancePanel" hidden>
+<section id="connectionError" role="alert" hidden><h1>通信エラーが発生しました。</h1><p id="connectionErrorMessage"></p><button id="retry" type="button">再接続</button></section>
 <h1>勤務予定・実績</h1>
 <p>勤務日と勤務時間を確認し、実際に働いた時間を入力してください。<br>保存すると、勤怠表に反映されます。</p>
 <label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" value="2026-10-01" required></label>
 <p class="muted">勤怠実績が登録されている場合は、登録済みの勤務時間を表示します。<br>未登録の場合は、シフト表の予定時間を表示します。</p>
 <p id="status" role="status" aria-live="polite"></p>
-<button id="retry" type="button" hidden>再試行</button>
 <div id="list"></div>
 </section>
 <div id="loading" role="status" aria-live="polite" aria-atomic="true" hidden>
@@ -49,15 +50,21 @@ const status=document.getElementById('status');
 const enrollmentStatus=document.getElementById('enrollmentStatus');
 const list=document.getElementById('list');
 const retry=document.getElementById('retry');
+const connectionError=document.getElementById('connectionError');
+const connectionErrorMessage=document.getElementById('connectionErrorMessage');
 const loading=document.getElementById('loading');
 const loadingMessage=document.getElementById('loadingMessage');
 const enrollmentPanel=document.getElementById('enrollmentPanel');
 const attendancePanel=document.getElementById('attendancePanel');
 const workDateInput=document.getElementById('workDate');
 const BASE_DATE='2026-10-01';
+const LOAD_ERROR='通信エラーが発生しました。サーバーに接続できませんでした。通信状態を確認し、「再接続」を押してください。';
+const SAVE_UNKNOWN_ERROR='勤怠情報が保存されたか確認できませんでした。重複登録を防ぐため、再度保存せず、通信状態を確認して「再接続」を押してください。';
 const messages={REGISTRATION_INVALID:'登録コードを確認できません。',ALREADY_REGISTERED:'このLINEアカウントは登録済みです。',DISABLED:'機能が停止中です。',AUTHENTICATION_FAILED:'LINE本人確認に失敗しました。',AUTHORIZATION_DENIED:'利用者設定を確認できません。',NOT_FOUND:'対象の勤務予定を確認できません。',CONFLICT:'別の操作で更新されています。勤怠情報を再取得してください。',UNAVAILABLE:'保存結果を確認できません。二重保存を避けるため再保存せず、勤怠表と変更履歴を確認してください。',SAVE_FAILED:'保存に失敗しました。勤怠管理表には反映されていません。入力内容を確認して再度保存してください。',SAVE_UNKNOWN:'保存結果を確定できません。二重保存を避けるため再保存せず、勤怠表と変更履歴を確認してください。',INVALID_REQUEST:'入力時刻を確認してください。'};
 function setLoading(active,message='勤怠情報を読み込んでいます…'){loadingMessage.textContent=message;loading.hidden=!active;app.setAttribute('aria-busy',String(active));}
 async function api(fields){const body=new URLSearchParams({id_token:token,...fields});const r=await fetch(GAS_URL,{method:'POST',body,redirect:'follow',referrerPolicy:'no-referrer'});if(!r.ok)throw Error('通信結果を確認できません。');const result=await r.json();if(!result.ok){const message=result.code==='UNAVAILABLE'&&fields.action!=='saveActual'?'勤怠情報を読み込めませんでした。再試行してください。':(messages[result.code]||'処理できませんでした。');const e=Error(message);e.code=result.code;throw e;}return result;}
+function showConnectionError(message=LOAD_ERROR){attendancePanel.hidden=false;attendancePanel.classList.add('connection-error');connectionError.hidden=false;connectionErrorMessage.textContent=message;list.replaceChildren();status.textContent='';}
+function clearConnectionError(){attendancePanel.classList.remove('connection-error');connectionError.hidden=true;}
 function rangeText(start,end,next){return start+'–'+end+(next?'（翌日）':'');}
 function render(records){
  list.replaceChildren();
@@ -80,7 +87,7 @@ function render(records){
    const saveDate=workDateInput.value;
    setLoading(true,'勤怠情報を保存しています…');
    try{await api({action:'saveActual',employeeId:row.employeeId,workDate:saveDate,actualStart:fields[0].value,actualEnd:fields[1].value,revision:String(row.revision)});const refreshed=await load(false,true);status.textContent=refreshed?'実績を保存し、勤怠表と変更履歴を再取得しました。':'実績は保存されましたが、画面の再取得に失敗しました。再保存せず、勤怠表を確認してください。';}
-   catch(err){const refreshed=await load(false,true);const saved=refreshed&&refreshed.records.some(x=>x.employeeId===row.employeeId&&x.saved&&x.revision>row.revision&&x.actualStart===fields[0].value&&x.actualEnd===fields[1].value);if(saved)status.textContent='保存済みであることを再取得で確認しました。';else if(err.code==='SAVE_FAILED')status.textContent=err.message;else if(refreshed)status.textContent=err.message+' 再保存せず、勤怠表と変更履歴を確認してください。';else status.textContent='保存結果を確認できません。二重保存を避けるため再保存せず、勤怠表と変更履歴を確認してください。';}
+   catch(err){const refreshed=await load(false,true);const saved=refreshed&&refreshed.records.some(x=>x.employeeId===row.employeeId&&x.saved&&x.revision>row.revision&&x.actualStart===fields[0].value&&x.actualEnd===fields[1].value);if(saved){clearConnectionError();status.textContent='保存済みであることを再取得で確認しました。';}else if(err.code==='SAVE_FAILED'){clearConnectionError();status.textContent=err.message;}else{showConnectionError(SAVE_UNKNOWN_ERROR);}}
    finally{busy=false;button.disabled=false;workDateInput.disabled=false;retry.disabled=false;}
   });
   card.appendChild(form);list.appendChild(card);
@@ -90,7 +97,7 @@ async function load(show=true,preserveOnError=false){
  const sequence=++requestSequence;
  const selectedDate=workDateInput.value;
  if(!selectedDate||selectedDate<BASE_DATE){status.textContent='勤怠日は2026-10-01以降を選択してください。';retry.hidden=true;return null;}
- retry.hidden=true;status.textContent='';setLoading(true,'勤怠情報を読み込んでいます…');
+ retry.disabled=false;clearConnectionError();status.textContent='';setLoading(true,'勤怠情報を読み込んでいます…');
  try{
   const data=await api({action:'attendanceList',workDate:selectedDate});
   if(sequence!==requestSequence||selectedDate!==workDateInput.value)return null;
@@ -100,9 +107,8 @@ async function load(show=true,preserveOnError=false){
  }catch(e){
   if(sequence!==requestSequence||selectedDate!==workDateInput.value)return null;
   if(e.code==='AUTHORIZATION_DENIED'){list.replaceChildren();attendancePanel.hidden=true;enrollmentPanel.hidden=false;enrollmentStatus.textContent='';retry.hidden=true;return null;}
-  if(!preserveOnError)list.replaceChildren();
-  status.textContent=e.message||'勤怠情報の読み込みに失敗しました。';
-  retry.hidden=false;
+  list.replaceChildren();
+  showConnectionError(LOAD_ERROR);
   return null;
  }finally{if(sequence===requestSequence)setLoading(false);}
 }
@@ -128,7 +134,7 @@ async function start(){
   if(!liff.isLoggedIn()){liff.login();return;}
   token=liff.getIDToken()||'';if(!token)throw Error('LINE本人確認情報を取得できません。');
   await load();
- }catch(e){enrollmentPanel.hidden=true;attendancePanel.hidden=false;status.textContent=e.message||'接続できませんでした。';retry.hidden=true;setLoading(false);}
+ }catch(e){enrollmentPanel.hidden=true;showConnectionError(LOAD_ERROR);setLoading(false);}
 }
 start();
 </script>
