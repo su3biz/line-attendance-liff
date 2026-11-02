@@ -9,7 +9,7 @@
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
 :root{font-family:system-ui,sans-serif;color:#202b26;background:#f4f7f5}body{margin:0}main{max-width:680px;margin:auto;padding:20px}article{background:#fff;border-radius:12px;padding:16px;margin:12px 0}label{display:block;margin:12px 0}input,button{font:inherit;padding:10px}button{background:#06a94d;color:#fff;border:0;border-radius:8px;min-height:44px}button:disabled{opacity:.5}[hidden]{display:none!important}#status,#enrollmentStatus{white-space:pre-wrap}.muted{color:#58645e;font-size:.95rem}.times{font-weight:600}.nextday{font-size:.9em;color:#58645e}
-#loading{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:#202b2666;padding:20px}
+#loading{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:#fff;padding:20px}
 .loading-card{background:#fff;border-radius:12px;padding:24px;min-width:220px;text-align:center;box-shadow:0 4px 24px #0003}
 .spinner{width:28px;height:28px;margin:0 auto 12px;border:4px solid #dce6df;border-top-color:#06a94d;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -95,7 +95,7 @@ async function load(show=true,preserveOnError=false){
   const data=await api({action:'attendanceList',workDate:selectedDate});
   if(sequence!==requestSequence||selectedDate!==workDateInput.value)return null;
   enrollmentPanel.hidden=true;attendancePanel.hidden=false;render(data.records);
-  if(show)status.textContent=data.records.length?data.records.length+'名分の勤務予定・実績を表示しています。':'この日の勤務予定はありません。';
+  if(show)status.textContent=data.records.length?data.records.length+'名分の勤務予定・実績を表示しています。':'';
   return data;
  }catch(e){
   if(sequence!==requestSequence||selectedDate!==workDateInput.value)return null;
@@ -127,9 +127,8 @@ async function start(){
   await liff.init({liffId:LIFF_ID});
   if(!liff.isLoggedIn()){liff.login();return;}
   token=liff.getIDToken()||'';if(!token)throw Error('LINE本人確認情報を取得できません。');
-  enrollmentPanel.hidden=true;attendancePanel.hidden=false;
   await load();
- }catch(e){attendancePanel.hidden=false;status.textContent=e.message||'接続できませんでした。';retry.hidden=true;setLoading(false);}
+ }catch(e){enrollmentPanel.hidden=true;attendancePanel.hidden=false;status.textContent=e.message||'接続できませんでした。';retry.hidden=true;setLoading(false);}
 }
 start();
 </script>
