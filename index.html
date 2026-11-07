@@ -32,6 +32,16 @@
 <h1>勤務予定・実績</h1>
 <p>勤務日と勤務時間を確認し、実際に働いた時間を入力してください。<br>保存すると、勤怠表に反映されます。</p>
 <label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" value="2026-10-01" required></label>
+<article id="shiftCard" hidden>
+<h2>シフト予定</h2>
+<p id="shiftHelp" class="muted">シフトの登録・変更は勤怠表と変更履歴に反映されます。</p>
+<form id="shiftForm">
+<label>開始 <input id="shiftStart" type="time" required></label>
+<label>終了 <input id="shiftEnd" type="time" required></label>
+<button id="shiftSaveButton" type="submit">シフトを登録</button>
+</form>
+<button id="shiftDeleteButton" type="button" hidden>シフトを削除</button>
+</article>
 <p class="muted">勤怠実績が登録されている場合は、登録済みの勤務時間を表示します。<br>未登録の場合は、シフト表の予定時間を表示します。</p>
 <p id="status" role="status" aria-live="polite"></p>
 <div id="list"></div>
@@ -43,7 +53,7 @@
 <script>
 'use strict';
 const LIFF_ID='2012227652-CgVMkyBb';
-const GAS_URL='https://script.google.com/macros/s/AKfycbzYQkx1NBTCGpqR6XGVXCgNP0s3PfE7_gZt2-FhhTkmFIKGhGoyqq6DA46rdNEXqqII/exec';
+const GAS_URL='https://script.google.com/macros/s/AKfycbxHVd1T5gwIN7EwpOgO3zrcOLT40DvlXe-4-SyHTOF2mAIfpUMXz8ac1GaekuY7CGti/exec';
 let token='',busy=false,requestSequence=0,liffReady=false,liffInitPromise=null;
 const app=document.getElementById('app');
 const status=document.getElementById('status');
@@ -57,18 +67,68 @@ const loadingMessage=document.getElementById('loadingMessage');
 const enrollmentPanel=document.getElementById('enrollmentPanel');
 const attendancePanel=document.getElementById('attendancePanel');
 const workDateInput=document.getElementById('workDate');
+const shiftCard=document.getElementById('shiftCard');
+const shiftForm=document.getElementById('shiftForm');
+const shiftStartInput=document.getElementById('shiftStart');
+const shiftEndInput=document.getElementById('shiftEnd');
+const shiftSaveButton=document.getElementById('shiftSaveButton');
+const shiftDeleteButton=document.getElementById('shiftDeleteButton');
+let shiftState=null;
 const BASE_DATE='2026-10-01';
 const LOAD_ERROR='通信エラーが発生しました。サーバーに接続できませんでした。通信状態を確認し、「再接続」を押してください。';
 const SAVE_UNKNOWN_ERROR='勤怠情報が保存されたか確認できませんでした。通信状態を確認し、「再接続」を押してください。';
+const SHIFT_SAVE_UNKNOWN_ERROR='シフトの保存結果を確認できません。再送せず、最新状態と変更履歴を確認してください。';
 const REQUEST_TIMEOUT_MS=20000;
 const LIFF_INIT_TIMEOUT_MS=15000;
-const messages={REGISTRATION_INVALID:'登録コードを確認できません。',ALREADY_REGISTERED:'このLINEアカウントは登録済みです。',DISABLED:'機能が停止中です。',AUTHENTICATION_FAILED:'LINE本人確認に失敗しました。',AUTHORIZATION_DENIED:'利用者設定を確認できません。',NOT_FOUND:'対象の勤務予定を確認できません。',CONFLICT:'別の操作で更新されています。勤怠情報を再取得してください。',UNAVAILABLE:'保存結果を確認できません。二重保存を避けるため再保存せず、勤怠表と変更履歴を確認してください。',SAVE_FAILED:'保存に失敗しました。勤怠管理表には反映されていません。入力内容を確認して再度保存してください。',SAVE_UNKNOWN:'保存結果を確定できません。二重保存を避けるため再保存せず、勤怠表と変更履歴を確認してください。',INVALID_REQUEST:'入力時刻を確認してください。'};
+const messages={REGISTRATION_INVALID:'登録コードを確認できません。',ALREADY_REGISTERED:'このLINEアカウントは登録済みです。',DISABLED:'機能が停止中です。',AUTHENTICATION_FAILED:'LINE本人確認に失敗しました。',AUTHORIZATION_DENIED:'利用者設定を確認できません。',NOT_FOUND:'対象の勤務予定を確認できません。',CONFLICT:'別の操作で更新されています。勤怠情報を再取得してください。',UNAVAILABLE:'保存結果を確認できません。二重保存を避けるため再保存せず、勤怠表と変更履歴を確認してください。',SAVE_FAILED:'保存に失敗しました。勤怠管理表には反映されていません。入力内容を確認して再度保存してください。',SAVE_UNKNOWN:'保存結果を確定できません。二重保存を避けるため再保存せず、勤怠表と変更履歴を確認してください。',INVALID_REQUEST:'入力時刻を確認してください。',WRITE_FAILED:'シフトの保存に失敗しました。元の状態への復元が確認されています。入力を確認して再試行してください。',ROLLBACK_FAILED:'シフトの反映状態を確定できません。再送せず、勤怠表と変更履歴を確認してください。',OUTCOME_UNKNOWN:'シフトの保存結果を確定できません。再送せず、最新状態と変更履歴を確認してください。',IDEMPOTENCY_CONFLICT:'同じ処理IDで異なる内容が検出されました。再読み込みしてください。',STORAGE_UNAVAILABLE:'シフトの保存先を確認できません。管理者に確認してください。',STORAGE_NOT_CONFIGURED:'シフトの保存先が設定されていません。管理者に確認してください。',FORBIDDEN:'この操作は許可されていません。',UNTRUSTED_ACTOR:'LINE本人確認に失敗しました。'};
 function setLoading(active,message='勤怠情報を読み込んでいます…'){loadingMessage.textContent=message;loading.hidden=!active;app.setAttribute('aria-busy',String(active));}
 function withTimeout(promise,ms,message){let timer;const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(message)),ms);});return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer));}
 async function api(fields){const body=new URLSearchParams({id_token:token,...fields});const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),REQUEST_TIMEOUT_MS);try{const r=await fetch(GAS_URL,{method:'POST',body,redirect:'follow',referrerPolicy:'no-referrer',signal:controller.signal});if(!r.ok)throw Error('通信結果を確認できません。');const result=await r.json();if(!result.ok){const message=result.code==='UNAVAILABLE'&&fields.action!=='saveActual'?'通信エラーが発生しました。サーバーに接続できませんでした。通信状態を確認し、「再接続」を押してください。':(messages[result.code]||'処理できませんでした。');const e=Error(message);e.code=result.code;throw e;}return result;}finally{clearTimeout(timer);}}
 function showConnectionError(message=LOAD_ERROR){attendancePanel.hidden=false;attendancePanel.classList.add('connection-error');connectionError.hidden=false;connectionErrorMessage.textContent=message;list.replaceChildren();status.textContent='';}
 function clearConnectionError(){attendancePanel.classList.remove('connection-error');connectionError.hidden=true;}
 function rangeText(start,end,next){return start+'–'+end+(next?'（翌日）':'');}
+function renderShift(value){
+ if(!value||typeof value.employeeId!=='string'||!value.employeeId||!Number.isSafeInteger(value.revision)||value.revision<0){shiftState=null;shiftCard.hidden=true;return;}
+ const schedule=value.schedule;
+ const validTime=value=>typeof value==='string'&&/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(value);
+ if(schedule!==null&&(!schedule||!validTime(schedule.startTime)||!validTime(schedule.endTime)||schedule.startTime===schedule.endTime)){
+  shiftState=null;shiftCard.hidden=true;status.textContent='シフト情報の形式を確認できません。再接続してください。';return;
+ }
+ shiftState={employeeId:value.employeeId,revision:value.revision,schedule:schedule?{startTime:schedule.startTime,endTime:schedule.endTime}:null};
+ shiftStartInput.value=schedule?schedule.startTime:'';shiftEndInput.value=schedule?schedule.endTime:'';
+ shiftSaveButton.textContent=schedule?'シフトを変更':'シフトを登録';shiftDeleteButton.hidden=!schedule;shiftCard.hidden=false;
+}
+function shiftOutcomeMatches(value,type,revision,startTime,endTime){
+ if(!value||value.revision!==revision+1)return false;
+ if(type==='delete')return value.schedule===null;
+ return !!value.schedule&&value.schedule.startTime===startTime&&value.schedule.endTime===endTime;
+}
+async function mutateShift(type){
+ const current=shiftState;
+ if(!['create','update','delete'].includes(type)||busy||!current||(type==='create'&&current.schedule)||(type!=='create'&&!current.schedule))return;
+ if(type==='delete'&&!window.confirm('この日のシフト予定を削除します。削除してよろしいですか？'))return;
+ const saveDate=workDateInput.value,startTime=type==='delete'?'':shiftStartInput.value,endTime=type==='delete'?'':shiftEndInput.value;
+ let requestId;
+ try{if(typeof crypto==='undefined'||typeof crypto.randomUUID!=='function')throw Error('安全な処理IDを生成できません。');requestId=crypto.randomUUID();}
+ catch(err){status.textContent=err.message;return;}
+ busy=true;workDateInput.disabled=true;retry.disabled=true;shiftSaveButton.disabled=true;shiftDeleteButton.disabled=true;shiftStartInput.disabled=true;shiftEndInput.disabled=true;
+ setLoading(true,'シフト予定を保存しています…');
+ try{
+  await api({action:'shiftMutation',type,requestId,employeeId:current.employeeId,workDate:saveDate,expectedRevision:String(current.revision),startTime,endTime});
+  const refreshed=await load(false,true);
+  if(refreshed)status.textContent='シフトを保存し、最新状態を再取得しました。変更履歴も記録されています。';
+  else{connectionErrorMessage.textContent=SHIFT_SAVE_UNKNOWN_ERROR;showConnectionError(SHIFT_SAVE_UNKNOWN_ERROR);}
+ }catch(err){
+  const refreshed=await load(false,true);
+  if(refreshed&&refreshed.workDate===saveDate&&workDateInput.value===saveDate&&shiftOutcomeMatches(refreshed.selfShift,type,current.revision,startTime,endTime)){
+   clearConnectionError();status.textContent='保存済みであることを最新状態の再取得で確認しました。';
+  }else if(refreshed){
+   clearConnectionError();status.textContent=err.code?err.message:SHIFT_SAVE_UNKNOWN_ERROR;
+  }else showConnectionError(SHIFT_SAVE_UNKNOWN_ERROR);
+ }finally{
+  busy=false;workDateInput.disabled=false;retry.disabled=false;shiftSaveButton.disabled=false;shiftDeleteButton.disabled=false;shiftStartInput.disabled=false;shiftEndInput.disabled=false;
+ }
+}
 function render(records){
  list.replaceChildren();
  if(!records.length){list.textContent='この日の勤務予定はありません。';return;}
@@ -104,7 +164,8 @@ async function load(show=true,preserveOnError=false){
  try{
   const data=await api({action:'attendanceList',workDate:selectedDate});
   if(sequence!==requestSequence||selectedDate!==workDateInput.value)return null;
-  enrollmentPanel.hidden=true;attendancePanel.hidden=false;render(data.records);
+  if(data.workDate!==selectedDate)throw Error('勤怠日の応答が一致しません。');
+  enrollmentPanel.hidden=true;attendancePanel.hidden=false;render(data.records);renderShift(data.selfShift);
   if(show)status.textContent=data.records.length?data.records.length+'名分の勤務予定・実績を表示しています。':'';
   return data;
  }catch(e){
@@ -130,6 +191,8 @@ document.getElementById('enrollment').addEventListener('submit',async e=>{
 });
 document.getElementById('retry').addEventListener('click',()=>{if(busy)return;if(liffReady)load();else start();});
 workDateInput.addEventListener('change',()=>{if(!busy)load();});
+shiftForm.addEventListener('submit',async event=>{event.preventDefault();if(!shiftState)return;await mutateShift(shiftState.schedule?'update':'create');});
+shiftDeleteButton.addEventListener('click',()=>mutateShift('delete'));
 async function initializeLiff(){
  if(!liffInitPromise){
   const pending=Promise.resolve().then(()=>liff.init({liffId:LIFF_ID}));
