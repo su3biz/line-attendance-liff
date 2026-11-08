@@ -9,13 +9,13 @@ const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const scriptMatch = html.match(/<script>\s*([\s\S]*?)<\/script>/);
 assert.ok(scriptMatch, 'existing root page has an inline LIFF script');
 const script = scriptMatch[1];
-const ISOLATED_GAS_V1_URL = 'https://script.google.com/macros/s/AKfycbxHVd1T5gwIN7EwpOgO3zrcOLT40DvlXe-4-SyHTOF2mAIfpUMXz8ac1GaekuY7CGti/exec';
+const DEV_GAS_V24_URL = 'https://script.google.com/macros/s/AKfycbzYQkx1NBTCGpqR6XGVXCgNP0s3PfE7_gZt2-FhhTkmFIKGhGoyqq6DA46rdNEXqqII/exec';
 
-test('existing root keeps the DEV LIFF identity and is pinned only to isolated GAS v1', () => {
+test('existing root keeps the DEV LIFF identity and is pinned to the existing DEV GAS deployment v24', () => {
   assert.match(script, /const LIFF_ID='2012227652-CgVMkyBb';/);
-  assert.match(script, new RegExp(`const GAS_URL='${ISOLATED_GAS_V1_URL.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}';`));
-  const endpoints = [...html.matchAll(/https:\/\/script\.google\.com\/macros\/s\/[^/'"\\s]+\/exec/g)].map((match) => match[0]);
-  assert.deepEqual([...new Set(endpoints)], [ISOLATED_GAS_V1_URL]);
+  assert.match(script, new RegExp(`const GAS_URL='${DEV_GAS_V24_URL.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}';`));
+  const endpoints = [...html.matchAll(/https:\/\/script\.google\.com\/macros\/s\/[^/'"]+\/exec/g)].map((match) => match[0]);
+  assert.deepEqual([...new Set(endpoints)], [DEV_GAS_V24_URL]);
   assert.equal((script.match(/\bfetch\s*\(/g) || []).length, 1);
   assert.match(script, /fetch\(GAS_URL,/);
 });
