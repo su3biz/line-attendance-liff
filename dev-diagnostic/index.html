@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex,nofollow">
+<title>DEV LIFF 通信診断</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#202b26;background:#f4f7f5}body{margin:0}main{max-width:680px;margin:auto;padding:20px}article{background:#fff;border-radius:12px;padding:16px;margin:12px 0}button{font:inherit;padding:10px;background:#06a94d;color:#fff;border:0;border-radius:8px;min-height:44px}button:disabled{opacity:.5}.muted{color:#58645e}.step{padding:8px 0;border-bottom:1px solid #e4eae6}.ok{color:#176b37}.fail{color:#b42318}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f4f7f5;padding:12px;border-radius:8px}[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>DEV LIFF 通信診断</h1>
+<article>
+<p><strong>診断ページは何も自動送信しません。</strong>「DEV通信を確認」を押すと、現在のブラウザーからDEV GASへ勤務一覧の読み取りを1回だけ行います。</p>
+<p class="muted">記録するのは通信開始、HTTP状態、JSON解析、応答の成功/失敗、画面描画の段階のみです。IDトークン、URLの認証コード、レスポンス本文、個人情報は画面やログに出しません。</p>
+<button id="run" type="button">DEV通信を確認</button>
+</article>
+<article aria-live="polite">
+<h2>診断結果</h2>
+<div id="steps"></div>
+<pre id="summary">未実行</pre>
+</article>
+</main>
+<script>
+'use strict';
+const GAS_URL='https://script.google.com/macros/s/AKfycbzYQkx1NBTCGpqR6XGVXCgNP0s3PfE7_gZt2-FhhTkmFIKGhGoyqq6DA46rdNEXqqII/exec';
+const steps=document.getElementById('steps');
+const summary=document.getElementById('summary');
+const button=document.getElementById('run');
+function mark(label,state,detail=''){
+ const row=document.createElement('div');row.className='step '+(state==='成功'?'ok':state==='失敗'?'fail':'');
+ row.textContent=label+': '+state+(detail?' — '+detail:'');steps.appendChild(row);
+}
+function safeErrorKind(error){
+ if(error&&error.name==='AbortError')return 'timeout';
+ if(error instanceof SyntaxError)return 'invalid_json';
+ if(error instanceof TypeError)return 'network_or_cors';
+ return 'request_failed';
+}
+button.addEventListener('click',async()=>{
+ button.disabled=true;steps.replaceChildren();summary.textContent='診断中…';
+ const started=performance.now();
+ let phase='通信開始';
+ try{
+  mark(phase,'成功');
+  phase='HTTP応答';
+  const response=await fetch(GAS_URL,{method:'POST',body:new URLSearchParams({action:'attendanceList',workDate:new Date().toISOString().slice(0,10)}),redirect:'follow',referrerPolicy:'no-referrer',credentials:'omit',signal:AbortSignal.timeout(20000)});
+  mark(phase,'成功','status '+response.status+' / redirected '+String(response.redirected));
+  phase='JSON解析';
+  const data=await response.json();
+  mark(phase,'成功','JSON object '+String(data!==null&&typeof data==='object'&&!Array.isArray(data)));
+  phase='応答判定';
+  if(!response.ok)throw Object.assign(new Error('http_status'),{diagnosticPhase:phase});
+  if(!data||typeof data!=='object'||Array.isArray(data))throw Object.assign(new Error('unexpected_json_shape'),{diagnosticPhase:phase});
+  if(data.ok!==true)throw Object.assign(new Error('api_not_ok'),{diagnosticPhase:phase});
+  phase='画面描画';
+  const check=document.createElement('span');check.textContent='診断結果を画面へ描画できました。';steps.appendChild(check);
+  mark(phase,'成功');
+  summary.textContent='全段階成功。LIFF内の認証・トークン付き通信、または本番画面の応答処理に原因が残る可能性があります。';
+ }catch(error){
+  const failedPhase=error.diagnosticPhase||phase;
+  mark(failedPhase,'失敗',safeErrorKind(error));
+  summary.textContent='失敗段階: '+failedPhase+'\n分類: '+safeErrorKind(error)+'\n経過時間: '+Math.round(performance.now()-started)+' ms';
+ }finally{button.disabled=false;}
+});
+</script>
+</body>
+</html>
