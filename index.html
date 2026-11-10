@@ -8,7 +8,7 @@
 <title>LINE勤怠</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
-:root{font-family:system-ui,sans-serif;color:#202b26;background:#f4f7f5}body{margin:0}main{max-width:680px;margin:auto;padding:20px}article,.entry-card{background:#fff;border-radius:12px;padding:16px;margin:12px 0}label{display:block;margin:12px 0}input,button{font:inherit;padding:10px}button{background:#06a94d;color:#fff;border:0;border-radius:8px;min-height:44px}button:disabled{opacity:.5}[hidden]{display:none!important}#status,#enrollmentStatus,#connectionErrorMessage{white-space:pre-wrap}.muted{color:#58645e;font-size:.95rem}.times{font-weight:600}.nextday{font-size:.9em;color:#58645e}.delete-action{margin-top:32px;padding-top:16px;border-top:1px solid #dce6df}.save-action{margin-top:12px}
+:root{font-family:system-ui,sans-serif;color:#202b26;background:#f4f7f5}body{margin:0}main{max-width:680px;margin:auto;padding:20px}article,.entry-card{background:#fff;border-radius:12px;padding:16px;margin:12px 0}label{display:block;margin:12px 0}input,button{font:inherit;padding:10px}button{background:#06a94d;color:#fff;border:0;border-radius:8px;min-height:44px}button:disabled{opacity:.5}[hidden]{display:none!important}#status,#enrollmentStatus,#connectionErrorMessage{white-space:pre-wrap}#diagnostics{background:#fff;border:1px solid #9ab5a4;border-radius:10px;padding:12px;margin-bottom:16px;font-size:.9rem}#diagnostics h2{font-size:1rem;margin:0 0 8px}#diagnostics dl{display:grid;grid-template-columns:minmax(130px,1fr) 2fr;gap:4px 10px;margin:0}#diagnostics dd{margin:0;overflow-wrap:anywhere}.muted{color:#58645e;font-size:.95rem}.times{font-weight:600}.nextday{font-size:.9em;color:#58645e}.delete-action{margin-top:32px;padding-top:16px;border-top:1px solid #dce6df}.save-action{margin-top:12px}
 #loading{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:#fff;padding:20px}
 
 .loading-card{background:#fff;border-radius:12px;padding:24px;min-width:220px;text-align:center;box-shadow:0 4px 24px #0003}
@@ -19,6 +19,7 @@
 </head>
 <body>
 <main id="app">
+<section id="diagnostics" aria-live="polite" hidden><h2>接続診断（機密情報は表示しません）</h2><dl><dt>通信開始</dt><dd id="diag-start">未実行</dd><dt>fetch</dt><dd id="diag-fetch">未実行</dd><dt>HTTP status</dt><dd id="diag-http">未取得</dd><dt>JSON解析</dt><dd id="diag-json">未実行</dd><dt>GAS応答</dt><dd id="diag-gas">未判定</dd><dt>描画</dt><dd id="diag-render">未実行</dd></dl></section>
 <section id="enrollmentPanel" hidden>
 <h1>LINE利用登録</h1>
 <p>管理者から受け取った登録コードを入力してください。</p>
@@ -56,6 +57,10 @@ const LIFF_ID='2012227652-CgVMkyBb';
 const GAS_URL='https://script.google.com/macros/s/AKfycbzYQkx1NBTCGpqR6XGVXCgNP0s3PfE7_gZt2-FhhTkmFIKGhGoyqq6DA46rdNEXqqII/exec';
 let token='',busy=false,requestSequence=0,liffReady=false,liffInitPromise=null;
 const app=document.getElementById('app');
+const diagnosticEnabled=new URLSearchParams(location.search).get('diagnostics')==='1';
+const diagnosticPanel=document.getElementById('diagnostics');
+if(diagnosticEnabled)diagnosticPanel.hidden=false;
+function diagnostic(id,value){if(!diagnosticEnabled)return;const node=document.getElementById('diag-'+id);if(node)node.textContent=value;}
 const status=document.getElementById('status');
 const enrollmentStatus=document.getElementById('enrollmentStatus');
 const list=document.getElementById('list');
@@ -91,13 +96,16 @@ const CLIENT_DIAGNOSTIC_STAGES=new Set(['attendance-fetch','attendance-http','at
 function clientDiagnostic(code,stage){if(!CLIENT_DIAGNOSTIC_CODES.has(code)||!CLIENT_DIAGNOSTIC_STAGES.has(stage))return;try{console.info('WORK_ENTRY_DIAGNOSTIC '+JSON.stringify({code,stage}));}catch(_){} }
 async function api(fields,phase='attendance'){
  const safePhase=CLIENT_DIAGNOSTIC_PHASES.has(phase)?phase:'attendance';
+ diagnostic('start','開始');diagnostic('fetch','実行中');diagnostic('http','未取得');diagnostic('json','未実行');diagnostic('gas','未判定');
  const body=new URLSearchParams({id_token:token,...fields}),controller=new AbortController();const timer=setTimeout(()=>controller.abort(),REQUEST_TIMEOUT_MS);
  try{
-  let r;try{r=await fetch(GAS_URL,{method:'POST',body,redirect:'follow',referrerPolicy:'no-referrer',signal:controller.signal});}catch(err){clientDiagnostic('CLIENT_TRANSPORT_ERROR',safePhase+'-fetch');throw err;}
-  if(!r.ok){clientDiagnostic('CLIENT_HTTP_ERROR',safePhase+'-http');throw Error('通信結果を確認できません。');}
-  let result;try{result=await r.json();}catch(err){clientDiagnostic('CLIENT_RESPONSE_PARSE_ERROR',safePhase+'-response');throw err;}
-  if(!result||typeof result!=='object'||Array.isArray(result)){clientDiagnostic('CLIENT_RESPONSE_PARSE_ERROR',safePhase+'-response');throw Error('通信結果を確認できません。');}
-  if(!result.ok){clientDiagnostic('CLIENT_SERVER_REJECTED',safePhase+'-application');const e=Error(messages[result.code]||'処理できませんでした。');e.code=result.code;throw e;}
+  let r;try{r=await fetch(GAS_URL,{method:'POST',body,redirect:'follow',referrerPolicy:'no-referrer',signal:controller.signal});diagnostic('fetch','成功');}catch(err){diagnostic('fetch','失敗');clientDiagnostic('CLIENT_TRANSPORT_ERROR',safePhase+'-fetch');throw err;}
+  diagnostic('http',String(r.status));
+  if(!r.ok){diagnostic('gas','未判定');clientDiagnostic('CLIENT_HTTP_ERROR',safePhase+'-http');throw Error('通信結果を確認できません。');}
+  let result;try{result=await r.json();diagnostic('json','成功');}catch(err){diagnostic('json','失敗');clientDiagnostic('CLIENT_RESPONSE_PARSE_ERROR',safePhase+'-response');throw err;}
+  if(!result||typeof result!=='object'||Array.isArray(result)){diagnostic('json','失敗');clientDiagnostic('CLIENT_RESPONSE_PARSE_ERROR',safePhase+'-response');throw Error('通信結果を確認できません。');}
+  if(!result.ok){const safeCode=typeof result.code==='string'&&Object.prototype.hasOwnProperty.call(messages,result.code)?result.code:'OTHER';diagnostic('gas','失敗（'+safeCode+'）');clientDiagnostic('CLIENT_SERVER_REJECTED',safePhase+'-application');const e=Error(messages[result.code]||'処理できませんでした。');e.code=result.code;throw e;}
+  diagnostic('gas','成功（ok=true）');
   return result;
  }finally{clearTimeout(timer);}
 }
@@ -169,7 +177,7 @@ async function load(show=true,diagnosticPhase='attendance'){
   const legacyWrites=data.writesEnabled===true;
   shiftWritesEnabled=typeof data.shiftWritesEnabled==='boolean'?data.shiftWritesEnabled:legacyWrites;
   attendanceWritesEnabled=typeof data.attendanceWritesEnabled==='boolean'?data.attendanceWritesEnabled:legacyWrites;
-  enrollmentPanel.hidden=true;attendancePanel.hidden=false;render(data);applyWriteMode();
+  enrollmentPanel.hidden=true;attendancePanel.hidden=false;diagnostic('render','実行中');try{render(data);diagnostic('render','成功');}catch(renderError){diagnostic('render','失敗');throw renderError;}applyWriteMode();
   if(show&&!status.textContent)status.textContent=!shiftWritesEnabled?'勤務情報の更新は停止中です。':(data.actorRole==='manager'?(data.records.length?data.records.length+'名分の勤務情報を表示しています。':''):'');
   return data;
  }catch(e){
