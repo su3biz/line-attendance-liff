@@ -19,7 +19,7 @@
 </head>
 <body>
 <main id="app">
-<section id="diagnostics" aria-live="polite" hidden><h2>接続診断（機密情報は表示しません）</h2><dl><dt>通信開始</dt><dd id="diag-start">未実行</dd><dt>fetch</dt><dd id="diag-fetch">未実行</dd><dt>HTTP status</dt><dd id="diag-http">未取得</dd><dt>JSON解析</dt><dd id="diag-json">未実行</dd><dt>GAS応答</dt><dd id="diag-gas">未判定</dd><dt>描画</dt><dd id="diag-render">未実行</dd></dl></section>
+<section id="diagnostics" aria-live="polite" hidden><h2>接続診断（機密情報は表示しません）</h2><dl><dt>通信開始</dt><dd id="diag-start">未実行</dd><dt>fetch</dt><dd id="diag-fetch">未実行</dd><dt>HTTP status</dt><dd id="diag-http">未取得</dd><dt>JSON解析</dt><dd id="diag-json">未実行</dd><dt>GAS応答</dt><dd id="diag-gas">未判定</dd><dt>応答後処理</dt><dd id="diag-processing">未実行</dd><dt>描画</dt><dd id="diag-render">未実行</dd></dl></section>
 <section id="enrollmentPanel" hidden>
 <h1>LINE利用登録</h1>
 <p>管理者から受け取った登録コードを入力してください。</p>
@@ -167,21 +167,30 @@ async function mutateEntry(type){
 }
 async function load(show=true,diagnosticPhase='attendance'){
  const sequence=++requestSequence,selectedDate=workDateInput.value;
+ let processingStage='API応答待ち';
+ diagnostic('processing','API応答待ち');
  shiftWritesEnabled=false;attendanceWritesEnabled=false;applyWriteMode();
  if(!selectedDate||selectedDate<BASE_DATE){status.textContent='勤怠日は2026-10-01以降を選択してください。';retry.hidden=true;return null;}
  retry.disabled=false;clearConnectionError();status.textContent='';setLoading(true,'勤怠情報を読み込んでいます…');
  try{
   const data=await api({action:'attendanceList',workDate:selectedDate},diagnosticPhase);
+  processingStage='応答後の要求状態確認';diagnostic('processing',processingStage);
   if(sequence!==requestSequence||selectedDate!==workDateInput.value)return null;
+  processingStage='応答の日付・区分確認';diagnostic('processing',processingStage);
   if(data.workDate!==selectedDate||!['today','past','future'].includes(data.dateClass))throw Error('勤怠日の応答を確認できません。');
+  processingStage='更新権限の反映';diagnostic('processing',processingStage);
   const legacyWrites=data.writesEnabled===true;
   shiftWritesEnabled=typeof data.shiftWritesEnabled==='boolean'?data.shiftWritesEnabled:legacyWrites;
   attendanceWritesEnabled=typeof data.attendanceWritesEnabled==='boolean'?data.attendanceWritesEnabled:legacyWrites;
-  enrollmentPanel.hidden=true;attendancePanel.hidden=false;diagnostic('render','実行中');try{render(data);diagnostic('render','成功');}catch(renderError){diagnostic('render','失敗');throw renderError;}applyWriteMode();
+  processingStage='画面パネルの切替';diagnostic('processing',processingStage);
+  enrollmentPanel.hidden=true;attendancePanel.hidden=false;processingStage='描画呼び出し';diagnostic('processing',processingStage);diagnostic('render','実行中');try{render(data);diagnostic('render','成功');}catch(renderError){diagnostic('render','失敗');throw renderError;}processingStage='描画後の操作状態更新';diagnostic('processing',processingStage);applyWriteMode();
+  processingStage='画面メッセージ更新';diagnostic('processing',processingStage);
   if(show&&!status.textContent)status.textContent=!shiftWritesEnabled?'勤務情報の更新は停止中です。':(data.actorRole==='manager'?(data.records.length?data.records.length+'名分の勤務情報を表示しています。':''):'');
+  diagnostic('processing','完了');
   return data;
  }catch(e){
   if(sequence!==requestSequence||selectedDate!==workDateInput.value)return null;
+  diagnostic('processing','失敗（'+processingStage+'）');
   if(e.code==='DISABLED'){attendancePanel.hidden=false;enrollmentPanel.hidden=true;entryState=null;entryCard.hidden=true;list.replaceChildren();shiftWritesEnabled=false;attendanceWritesEnabled=false;dateClass='invalid';clearConnectionError();status.textContent=e.message;return null;}
   if(e.code==='AUTHORIZATION_DENIED'){list.replaceChildren();attendancePanel.hidden=true;enrollmentPanel.hidden=false;enrollmentStatus.textContent='';retry.hidden=true;return null;}
   list.replaceChildren();showConnectionError(LOAD_ERROR);return null;
