@@ -31,7 +31,7 @@
 <p id="enrollmentStatus" role="status" aria-live="polite"></p>
 </section>
 <section id="attendancePanel" hidden>
-<section id="connectionError" role="alert" hidden><h1 id="connectionErrorHeading">通信エラーが発生しました。</h1><p id="connectionErrorMessage"></p><p id="authErrorCode" hidden>エラーコード：AUTHENTICATION_FAILED</p><p id="authDiagnosticCode" hidden></p><p id="authHttpStatus" hidden></p><section id="authDetails" hidden><h2>一時認証診断</h2><p>decodedの内容は未検証です。表示は真偽判定のみです。</p><dl><dt>IDトークン取得</dt><dd id="authTokenPresent">未確認</dd><dt>aud一致</dt><dd id="authAudMatches">未確認</dd><dt>iss一致</dt><dd id="authIssMatches">未確認</dd><dt>exp期限内</dt><dd id="authExpValid">未確認</dd><dt>sub存在</dt><dd id="authSubPresent">未確認</dd><dt>iat妥当</dt><dd id="authIatValid">未確認</dd><dt>Verify URL</dt><dd id="verifyUrlOk">未確認</dd><dt>Verify method</dt><dd id="verifyMethodOk">未確認</dd><dt>contentType</dt><dd id="verifyContentTypeOk">未確認</dd><dt>id_token存在・型</dt><dd id="verifyIdTokenOk">未確認</dd><dt>client_id存在・型</dt><dd id="verifyClientIdOk">未確認</dd><dt>client_id一致</dt><dd id="verifyClientIdMatches">未確認</dd><dt>設定チャネル一致</dt><dd id="verifyConfiguredChannelMatches">未確認</dd></dl></section><button id="retry" type="button">再接続</button></section>
+<section id="connectionError" role="alert" hidden><h1 id="connectionErrorHeading">通信エラーが発生しました。</h1><p id="connectionErrorMessage"></p><p id="authErrorCode" hidden>エラーコード：AUTHENTICATION_FAILED</p><p id="authDiagnosticCode" hidden></p><p id="authHttpStatus" hidden></p><section id="authDetails" hidden><h2>一時認証診断</h2><p>decodedの内容は未検証です。表示は真偽判定のみです。</p><dl><dt>IDトークン取得</dt><dd id="authTokenPresent">未確認</dd><dt>起動時トークン判定</dt><dd id="authTokenReason">未確認</dd><dt>期限切れ経過</dt><dd id="authExpiredSeconds">未確認</dd><dt>aud一致</dt><dd id="authAudMatches">未確認</dd><dt>iss一致</dt><dd id="authIssMatches">未確認</dd><dt>exp期限内</dt><dd id="authExpValid">未確認</dd><dt>sub存在</dt><dd id="authSubPresent">未確認</dd><dt>iat妥当</dt><dd id="authIatValid">未確認</dd><dt>Verify URL</dt><dd id="verifyUrlOk">未確認</dd><dt>Verify method</dt><dd id="verifyMethodOk">未確認</dd><dt>contentType</dt><dd id="verifyContentTypeOk">未確認</dd><dt>id_token存在・型</dt><dd id="verifyIdTokenOk">未確認</dd><dt>client_id存在・型</dt><dd id="verifyClientIdOk">未確認</dd><dt>client_id一致</dt><dd id="verifyClientIdMatches">未確認</dd><dt>設定チャネル一致</dt><dd id="verifyConfiguredChannelMatches">未確認</dd></dl></section><button id="retry" type="button">再接続</button></section>
 <h1>勤務予定・実績</h1>
 <p>勤務日と勤務時間を確認してください。保存すると、対象日に応じてシフト表と勤怠表へ反映されます。</p>
 <label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" value="2026-10-05" required></label>
@@ -73,6 +73,8 @@ const authErrorCode=document.getElementById('authErrorCode');
 const authDiagnosticCode=document.getElementById('authDiagnosticCode');
 const authHttpStatus=document.getElementById('authHttpStatus');
 const authDetails=document.getElementById('authDetails');
+const authTokenReason=document.getElementById('authTokenReason');
+const authExpiredSeconds=document.getElementById('authExpiredSeconds');
 let clientTokenDiagnostic=null;
 const loading=document.getElementById('loading');
 const loadingMessage=document.getElementById('loadingMessage');
@@ -120,6 +122,8 @@ async function api(fields,phase='attendance'){
 function showConnectionError(message=LOAD_ERROR,code='',diagnosticCode='',httpStatus=null,verifyRequest=null){attendancePanel.hidden=false;attendancePanel.classList.add('connection-error');connectionError.hidden=false;const authFailed=code==='AUTHENTICATION_FAILED';const safeDiagnostic=AUTH_FAILURE_DIAGNOSTIC_CODES.has(diagnosticCode);const safeHttpStatus=Number.isInteger(httpStatus)&&httpStatus>=100&&httpStatus<=599;connectionErrorHeading.textContent=authFailed?'認証できませんでした':'通信エラーが発生しました。';connectionErrorMessage.textContent=authFailed?'LINEアカウントの認証を確認できませんでした。\n\nLINEアプリから開き直してください。':message;authErrorCode.hidden=!authFailed;authDiagnosticCode.hidden=!authFailed||!diagnosticEnabled||!safeDiagnostic;authDiagnosticCode.textContent=authDiagnosticCode.hidden?'':'診断コード：'+diagnosticCode;authHttpStatus.hidden=!authFailed||!diagnosticEnabled||diagnosticCode!=='VERIFY_HTTP_ERROR'||!safeHttpStatus;authHttpStatus.textContent=authHttpStatus.hidden?'':'HTTPステータス：'+httpStatus;authDetails.hidden=!authFailed||!diagnosticEnabled;renderAuthDetails(verifyRequest);list.replaceChildren();status.textContent='';}
 function renderAuthDetails(verifyRequest){
  const d=clientTokenDiagnostic||{};
+ authTokenReason.textContent=d.reason||'未確認';
+ authExpiredSeconds.textContent=Number.isSafeInteger(d.expiredSeconds)?String(d.expiredSeconds)+'秒':'該当なし';
  const values={authTokenPresent:d.tokenPresent,authAudMatches:d.audMatches,authIssMatches:d.issMatches,authExpValid:d.expValid,authSubPresent:d.subPresent,authIatValid:d.iatValid};
  const keys=['urlOk','methodOk','contentTypeOk'];keys.forEach(k=>values['verify'+k[0].toUpperCase()+k.slice(1)]=verifyRequest&&typeof verifyRequest[k]==='boolean'?verifyRequest[k]:null);
  values.verifyIdTokenOk=verifyRequest&&typeof verifyRequest.idTokenPresent==='boolean'&&typeof verifyRequest.idTokenTypeOk==='boolean'?verifyRequest.idTokenPresent&&verifyRequest.idTokenTypeOk:null;
@@ -249,9 +253,16 @@ async function start(){
   if(!liff.isLoggedIn()){liff.login();return;}
   token=liff.getIDToken()||'';
   let decodedIdToken=null;try{decodedIdToken=liff.getDecodedIDToken();}catch(_){}
-  const now=Math.floor(Date.now()/1000);
-  clientTokenDiagnostic={tokenPresent:typeof token==='string'&&token.length>0,audMatches:!!decodedIdToken&&String(decodedIdToken.aud)==='2012227652',issMatches:!!decodedIdToken&&decodedIdToken.iss==='https://access.line.me',expValid:!!decodedIdToken&&Number.isSafeInteger(decodedIdToken.exp)&&decodedIdToken.exp>now,subPresent:!!decodedIdToken&&typeof decodedIdToken.sub==='string'&&decodedIdToken.sub.length>0,iatValid:!!decodedIdToken&&Number.isSafeInteger(decodedIdToken.iat)&&decodedIdToken.iat>0&&decodedIdToken.iat<=now+60};
-  if(!token){const error=Error('LINE本人確認情報を取得できません。');error.code='AUTHENTICATION_FAILED';throw error;}
+  const now=Date.now()/1000;
+  const exp=decodedIdToken&&decodedIdToken.exp;
+  const expValid=typeof exp==='number'&&Number.isFinite(exp)&&exp>0;
+  const tokenPresent=typeof token==='string'&&token.length>0;
+  let tokenReason='TOKEN_VALID',expiredSeconds=null;
+  if(!tokenPresent)tokenReason='TOKEN_NOT_FOUND';
+  else if(!expValid)tokenReason='EXP_INVALID';
+  else if(exp<=now){tokenReason='TOKEN_EXPIRED';expiredSeconds=Math.floor(now-exp);}
+  clientTokenDiagnostic={tokenPresent,reason:tokenReason,expiredSeconds,audMatches:!!decodedIdToken&&String(decodedIdToken.aud)==='2012227652',issMatches:!!decodedIdToken&&decodedIdToken.iss==='https://access.line.me',expValid:expValid&&exp>now,subPresent:!!decodedIdToken&&typeof decodedIdToken.sub==='string'&&decodedIdToken.sub.length>0,iatValid:!!decodedIdToken&&Number.isSafeInteger(decodedIdToken.iat)&&decodedIdToken.iat>0&&decodedIdToken.iat<=now+60};
+  if(tokenReason!=='TOKEN_VALID'){const error=Error('LINE本人確認情報を取得できません。');error.code='AUTHENTICATION_FAILED';throw error;}
   liffReady=true;
   await load();
  }catch(e){enrollmentPanel.hidden=true;showConnectionError(e.code==='AUTHENTICATION_FAILED'?messages.AUTHENTICATION_FAILED:LOAD_ERROR,e.code,e.diagnosticCode,e.httpStatus,e.verifyRequest);}
