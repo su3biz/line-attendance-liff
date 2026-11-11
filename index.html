@@ -10,16 +10,16 @@
 <style>
 :root{font-family:system-ui,sans-serif;color:#202b26;background:#f4f7f5}body{margin:0}main{max-width:680px;margin:auto;padding:20px}article,.entry-card{background:#fff;border-radius:12px;padding:16px;margin:12px 0}label{display:block;margin:12px 0}input,button{font:inherit;padding:10px}button{background:#06a94d;color:#fff;border:0;border-radius:8px;min-height:44px}button:disabled{opacity:.5}[hidden]{display:none!important}#status,#enrollmentStatus,#connectionErrorMessage{white-space:pre-wrap}#diagnostics{background:#fff;border:1px solid #9ab5a4;border-radius:10px;padding:12px;margin-bottom:16px;font-size:.9rem}#diagnostics h2{font-size:1rem;margin:0 0 8px}#diagnostics dl{display:grid;grid-template-columns:minmax(130px,1fr) 2fr;gap:4px 10px;margin:0}#diagnostics dd{margin:0;overflow-wrap:anywhere}.muted{color:#58645e;font-size:.95rem}.times{font-weight:600}.nextday{font-size:.9em;color:#58645e}.delete-action{margin-top:32px;padding-top:16px;border-top:1px solid #dce6df}.save-action{margin-top:12px}
 #loading{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:#fff;padding:20px}
+#lineSubId{margin:12px 0 0;overflow-wrap:anywhere;font-size:.9rem;color:#58645e}
 
 .loading-card{background:#fff;border-radius:12px;padding:24px;min-width:220px;text-align:center;box-shadow:0 4px 24px #0003}
 #attendancePanel.connection-error > :not(#connectionError){display:none!important}
-#attendancePanel.authentication-error > :not(#authenticationError){display:none!important}
 .spinner{width:28px;height:28px;margin:0 auto 12px;border:4px solid #dce6df;border-top-color:#06a94d;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
-<main id="app">
+<main id="app" data-auth-diagnostics="disabled">
 <section id="diagnostics" aria-live="polite" hidden><h2>接続診断（機密情報は表示しません）</h2><dl><dt>通信開始</dt><dd id="diag-start">未実行</dd><dt>fetch</dt><dd id="diag-fetch">未実行</dd><dt>HTTP status</dt><dd id="diag-http">未取得</dd><dt>JSON解析</dt><dd id="diag-json">未実行</dd><dt>GAS応答</dt><dd id="diag-gas">未判定</dd><dt>応答後処理</dt><dd id="diag-processing">未実行</dd><dt>描画</dt><dd id="diag-render">未実行</dd></dl></section>
 <section id="enrollmentPanel" hidden>
 <h1>LINE利用登録</h1>
@@ -31,8 +31,7 @@
 <p id="enrollmentStatus" role="status" aria-live="polite"></p>
 </section>
 <section id="attendancePanel" hidden>
-<section id="connectionError" role="alert" hidden><h1>通信エラーが発生しました。</h1><p id="connectionErrorMessage"></p><button id="retry" type="button">再接続</button></section>
-<section id="authenticationError" role="alert" hidden><h1>認証できませんでした</h1><p>LINEアカウントの認証を確認できませんでした。</p><p>LINEアプリから開き直してください。</p><p>エラーコード：AUTHENTICATION_FAILED</p><p id="lineSubId" aria-live="polite">Sub IDを取得できませんでした</p><button id="authenticationRetry" type="button">再接続</button></section>
+<section id="connectionError" role="alert" hidden><h1 id="connectionErrorHeading">通信エラーが発生しました。</h1><p id="connectionErrorMessage"></p><p id="authErrorCode" hidden>エラーコード：AUTHENTICATION_FAILED</p><p id="authDiagnosticCode" hidden></p><button id="retry" type="button">再接続</button></section>
 <h1>勤務予定・実績</h1>
 <p>勤務日と勤務時間を確認してください。保存すると、対象日に応じてシフト表と勤怠表へ反映されます。</p>
 <label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" value="2026-10-05" required></label>
@@ -59,7 +58,7 @@ const LIFF_ID='2012227652-CgVMkyBb';
 const GAS_URL='https://script.google.com/macros/s/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS/exec';
 let token='',busy=false,requestSequence=0,liffReady=false,liffInitPromise=null;
 const app=document.getElementById('app');
-const diagnosticEnabled=new URLSearchParams(location.search).get('diagnostics')==='1';
+const diagnosticEnabled=new URLSearchParams(typeof location==='undefined'?'':location.search).get('authDiagnostics')==='DEV';
 const diagnosticPanel=document.getElementById('diagnostics');
 if(diagnosticEnabled)diagnosticPanel.hidden=false;
 function diagnostic(id,value){if(!diagnosticEnabled)return;const node=document.getElementById('diag-'+id);if(node)node.textContent=value;}
@@ -69,9 +68,9 @@ const list=document.getElementById('list');
 const retry=document.getElementById('retry');
 const connectionError=document.getElementById('connectionError');
 const connectionErrorMessage=document.getElementById('connectionErrorMessage');
-const authenticationError=document.getElementById('authenticationError');
-const authenticationRetry=document.getElementById('authenticationRetry');
-const lineSubId=document.getElementById('lineSubId');
+const connectionErrorHeading=document.getElementById('connectionErrorHeading');
+const authErrorCode=document.getElementById('authErrorCode');
+const authDiagnosticCode=document.getElementById('authDiagnosticCode');
 const loading=document.getElementById('loading');
 const loadingMessage=document.getElementById('loadingMessage');
 const enrollmentPanel=document.getElementById('enrollmentPanel');
@@ -93,6 +92,7 @@ const DELETE_UNKNOWN_ERROR='削除結果を確認できませんでした。再�
 const REQUEST_TIMEOUT_MS=20000;
 const LIFF_INIT_TIMEOUT_MS=15000;
 const messages={REGISTRATION_INVALID:'登録コードを確認できません。',ALREADY_REGISTERED:'このLINEアカウントは登録済みです。',DISABLED:'機能が停止中です。',AUTHENTICATION_FAILED:'LINE本人確認に失敗しました。',AUTHORIZATION_DENIED:'利用者設定を確認できません。',NOT_FOUND:'対象の勤務情報を確認できません。',CONFLICT:'別の操作で更新されています。勤怠情報を再取得してください。',UNAVAILABLE:'保存結果を確認できません。重複書き込みを避けるため再送せず、シフト表・勤怠表と変更履歴を確認してください。',SAVE_FAILED:'保存に失敗しました。変更前の状態への復旧が確認されています。入力内容を確認して再度操作してください。',SAVE_UNKNOWN:'保存結果を確定できません。重複書き込みを避けるため再送せず、シフト表・勤怠表と変更履歴を確認してください。',INVALID_REQUEST:'開始・終了時刻を確認してください。',WRITE_FAILED:'保存に失敗しました。変更前の状態への復旧が確認されています。',ROLLBACK_FAILED:'一部の更新に失敗し、復旧を確認できません。再送せず、両方の表と変更履歴を確認してください。',OUTCOME_UNKNOWN:'保存結果を確定できません。再送せず、両方の表と変更履歴を確認してください。',IDEMPOTENCY_CONFLICT:'同じ処理IDで異なる内容が検出されました。再接続して最新状態を確認してください。',STORAGE_UNAVAILABLE:'保存先の状態を確認できません。管理者に確認してください。',STORAGE_NOT_CONFIGURED:'保存先が設定されていません。管理者に確認してください。',FORBIDDEN:'この操作は許可されていません。',UNTRUSTED_ACTOR:'LINE本人確認に失敗しました。',FUTURE_ACTUAL_ONLY:'未来日の勤怠実績のみの記録は保存できません。日付を確認してください。'};
+const AUTH_FAILURE_DIAGNOSTIC_CODES=new Set(['VERIFY_CONFIG_INVALID','VERIFY_TRANSPORT_ERROR','VERIFY_RESPONSE_INVALID','VERIFY_HTTP_ERROR','VERIFY_RESPONSE_READ_ERROR','VERIFY_JSON_INVALID','CLAIM_ISSUER_MISMATCH','CLAIM_AUDIENCE_MISMATCH','CLAIM_SUB_INVALID','CLAIM_EXPIRY_INVALID','CLAIM_EXPIRED']);
 function setLoading(active,message='勤怠情報を読み込んでいます…'){loadingMessage.textContent=message;loading.hidden=!active;app.setAttribute('aria-busy',String(active));}
 function withTimeout(promise,ms,message){let timer;const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(message)),ms);});return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer));}
 const CLIENT_DIAGNOSTIC_CODES=new Set(['CLIENT_TRANSPORT_ERROR','CLIENT_HTTP_ERROR','CLIENT_RESPONSE_PARSE_ERROR','CLIENT_SERVER_REJECTED']);
@@ -109,14 +109,13 @@ async function api(fields,phase='attendance'){
   if(!r.ok){diagnostic('gas','未判定');clientDiagnostic('CLIENT_HTTP_ERROR',safePhase+'-http');throw Error('通信結果を確認できません。');}
   let result;try{result=await r.json();diagnostic('json','成功');}catch(err){diagnostic('json','失敗');clientDiagnostic('CLIENT_RESPONSE_PARSE_ERROR',safePhase+'-response');throw err;}
   if(!result||typeof result!=='object'||Array.isArray(result)){diagnostic('json','失敗');clientDiagnostic('CLIENT_RESPONSE_PARSE_ERROR',safePhase+'-response');throw Error('通信結果を確認できません。');}
-  if(!result.ok){const safeCode=typeof result.code==='string'&&Object.prototype.hasOwnProperty.call(messages,result.code)?result.code:'OTHER';diagnostic('gas','失敗（'+safeCode+'）');clientDiagnostic('CLIENT_SERVER_REJECTED',safePhase+'-application');const e=Error(messages[result.code]||'処理できませんでした。');e.code=result.code;throw e;}
+  if(!result.ok){const safeCode=typeof result.code==='string'&&Object.prototype.hasOwnProperty.call(messages,result.code)?result.code:'OTHER';diagnostic('gas','失敗（'+safeCode+'）');clientDiagnostic('CLIENT_SERVER_REJECTED',safePhase+'-application');const e=Error(messages[result.code]||'処理できませんでした。');e.code=result.code;if(result.code==='AUTHENTICATION_FAILED'&&AUTH_FAILURE_DIAGNOSTIC_CODES.has(result.diagnosticCode))e.diagnosticCode=result.diagnosticCode;throw e;}
   diagnostic('gas','成功（ok=true）');
   return result;
  }finally{clearTimeout(timer);}
 }
-function showConnectionError(message=LOAD_ERROR){attendancePanel.hidden=false;attendancePanel.classList.remove('authentication-error');authenticationError.hidden=true;attendancePanel.classList.add('connection-error');connectionError.hidden=false;connectionErrorMessage.textContent=message;list.replaceChildren();status.textContent='';}
-function showAuthenticationError(){attendancePanel.hidden=false;attendancePanel.classList.remove('connection-error');connectionError.hidden=true;attendancePanel.classList.add('authentication-error');authenticationError.hidden=false;list.replaceChildren();status.textContent='';}
-function clearConnectionError(){attendancePanel.classList.remove('connection-error');attendancePanel.classList.remove('authentication-error');connectionError.hidden=true;authenticationError.hidden=true;}
+function showConnectionError(message=LOAD_ERROR,code='',diagnosticCode=''){attendancePanel.hidden=false;attendancePanel.classList.add('connection-error');connectionError.hidden=false;const authFailed=code==='AUTHENTICATION_FAILED';connectionErrorHeading.textContent=authFailed?'認証できませんでした':'通信エラーが発生しました。';connectionErrorMessage.textContent=authFailed?'LINEアカウントの認証を確認できませんでした。\n\nLINEアプリから開き直してください。':message;authErrorCode.hidden=!authFailed;authDiagnosticCode.hidden=!authFailed||!diagnosticEnabled||!AUTH_FAILURE_DIAGNOSTIC_CODES.has(diagnosticCode);authDiagnosticCode.textContent=authDiagnosticCode.hidden?'':'DEV診断コード：'+diagnosticCode;list.replaceChildren();status.textContent='';}
+function clearConnectionError(){attendancePanel.classList.remove('connection-error');connectionError.hidden=true;}
 function validTime(value){return typeof value==='string'&&/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(value);}
 function dateClassFor(selectedDate){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const today=parts.filter(part=>part.type!=='literal').map(part=>part.value).join('-');return selectedDate===today?'today':selectedDate<today?'past':'future';}
 function scheduleTime(value){if(typeof value==='number'){if(!Number.isFinite(value)||value<0||value>=24)throw Error('schedule time');const minutes=Math.round(value*60);if(Math.abs(value*60-minutes)>1e-8)throw Error('schedule time');return String(Math.floor(minutes/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0');}if(validTime(value))return value;throw Error('schedule time');}
@@ -201,8 +200,7 @@ async function load(show=true,diagnosticPhase='attendance'){
   diagnostic('processing','失敗（'+processingStage+'）');
   if(e.code==='DISABLED'){attendancePanel.hidden=false;enrollmentPanel.hidden=true;entryState=null;entryCard.hidden=true;list.replaceChildren();shiftWritesEnabled=false;attendanceWritesEnabled=false;dateClass='invalid';clearConnectionError();status.textContent=e.message;return null;}
   if(e.code==='AUTHORIZATION_DENIED'){list.replaceChildren();attendancePanel.hidden=true;enrollmentPanel.hidden=false;enrollmentStatus.textContent='';retry.hidden=true;return null;}
-  if(e.code==='AUTHENTICATION_FAILED'){enrollmentPanel.hidden=true;showAuthenticationError();return null;}
-  list.replaceChildren();showConnectionError(LOAD_ERROR);return null;
+  list.replaceChildren();showConnectionError(e.code==='AUTHENTICATION_FAILED'?messages.AUTHENTICATION_FAILED:LOAD_ERROR,e.code,e.diagnosticCode);return null;
  }finally{if(sequence===requestSequence)setLoading(false);}
 }
 document.getElementById('enrollment').addEventListener('submit',async e=>{
@@ -218,9 +216,7 @@ document.getElementById('enrollment').addEventListener('submit',async e=>{
  }catch(err){enrollmentStatus.textContent=err.code==='DISABLED'?err.message:(err.message||'利用登録を確認できませんでした。')+' 登録結果が不明な場合は管理者に確認してください。';}
  finally{setLoading(false);busy=false;button.disabled=false;input.disabled=false;}
 });
-const reconnect=()=>{if(busy)return null;if(liffReady)return load();return start();};
-document.getElementById('retry').addEventListener('click',reconnect);
-authenticationRetry.addEventListener('click',reconnect);
+document.getElementById('retry').addEventListener('click',()=>{if(busy)return;if(liffReady)load();else start();});
 workDateInput.addEventListener('change',()=>{if(!busy)load();});
 entryForm.addEventListener('submit',async event=>{event.preventDefault();await mutateEntry('save');});
 deleteButton.addEventListener('click',()=>mutateEntry('delete'));
@@ -240,7 +236,6 @@ async function start(){
   if(!liff.isLoggedIn()){liff.login();return;}
   const decodedIdToken=liff.getDecodedIDToken();
   const currentSub=decodedIdToken&&typeof decodedIdToken.sub==='string'?decodedIdToken.sub:'';
-  lineSubId.textContent=currentSub?'アクセス中のLINE Sub ID：'+currentSub:'Sub IDを取得できませんでした';
   token=liff.getIDToken()||'';if(!token)throw Error('LINE本人確認情報を取得できません。');
   liffReady=true;
   await load();
