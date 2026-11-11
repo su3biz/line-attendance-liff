@@ -96,6 +96,7 @@ const SAVE_UNKNOWN_ERROR='保存結果を確認できませんでした。重複
 const DELETE_UNKNOWN_ERROR='削除結果を確認できませんでした。再送せず、再接続してシフト表・勤怠表の状態を確認してください。';
 const REQUEST_TIMEOUT_MS=20000;
 const LIFF_INIT_TIMEOUT_MS=15000;
+const AUTH_RECOVERY_SESSION_KEY='lineAttendanceAuthRecoveryAttempt';
 const messages={REGISTRATION_INVALID:'登録コードを確認できません。',ALREADY_REGISTERED:'このLINEアカウントは登録済みです。',DISABLED:'機能が停止中です。',AUTHENTICATION_FAILED:'LINE本人確認に失敗しました。',AUTHORIZATION_DENIED:'利用者設定を確認できません。',NOT_FOUND:'対象の勤務情報を確認できません。',CONFLICT:'別の操作で更新されています。勤怠情報を再取得してください。',UNAVAILABLE:'保存結果を確認できません。重複書き込みを避けるため再送せず、シフト表・勤怠表と変更履歴を確認してください。',SAVE_FAILED:'保存に失敗しました。変更前の状態への復旧が確認されています。入力内容を確認して再度操作してください。',SAVE_UNKNOWN:'保存結果を確定できません。重複書き込みを避けるため再送せず、シフト表・勤怠表と変更履歴を確認してください。',INVALID_REQUEST:'開始・終了時刻を確認してください。',WRITE_FAILED:'保存に失敗しました。変更前の状態への復旧が確認されています。',ROLLBACK_FAILED:'一部の更新に失敗し、復旧を確認できません。再送せず、両方の表と変更履歴を確認してください。',OUTCOME_UNKNOWN:'保存結果を確定できません。再送せず、両方の表と変更履歴を確認してください。',IDEMPOTENCY_CONFLICT:'同じ処理IDで異なる内容が検出されました。再接続して最新状態を確認してください。',STORAGE_UNAVAILABLE:'保存先の状態を確認できません。管理者に確認してください。',STORAGE_NOT_CONFIGURED:'保存先が設定されていません。管理者に確認してください。',FORBIDDEN:'この操作は許可されていません。',UNTRUSTED_ACTOR:'LINE本人確認に失敗しました。',FUTURE_ACTUAL_ONLY:'未来日の勤怠実績のみの記録は保存できません。日付を確認してください。'};
 const AUTH_FAILURE_DIAGNOSTIC_CODES=new Set(['VERIFY_CONFIG_INVALID','VERIFY_TRANSPORT_ERROR','VERIFY_RESPONSE_INVALID','VERIFY_HTTP_ERROR','VERIFY_RESPONSE_READ_ERROR','VERIFY_JSON_INVALID','CLAIM_ISSUER_MISMATCH','CLAIM_AUDIENCE_MISMATCH','CLAIM_SUB_INVALID','CLAIM_EXPIRY_INVALID','CLAIM_EXPIRED']);
 function setLoading(active,message='勤怠情報を読み込んでいます…'){loadingMessage.textContent=message;loading.hidden=!active;app.setAttribute('aria-busy',String(active));}
@@ -104,8 +105,39 @@ const CLIENT_DIAGNOSTIC_CODES=new Set(['CLIENT_TRANSPORT_ERROR','CLIENT_HTTP_ERR
 const CLIENT_DIAGNOSTIC_PHASES=new Set(['attendance','mutation','readback','registration']);
 const CLIENT_DIAGNOSTIC_STAGES=new Set(['attendance-fetch','attendance-http','attendance-response','attendance-application','mutation-fetch','mutation-http','mutation-response','mutation-application','readback-fetch','readback-http','readback-response','readback-application','registration-fetch','registration-http','registration-response','registration-application']);
 function clientDiagnostic(code,stage){if(!CLIENT_DIAGNOSTIC_CODES.has(code)||!CLIENT_DIAGNOSTIC_STAGES.has(stage))return;try{console.info('WORK_ENTRY_DIAGNOSTIC '+JSON.stringify({code,stage}));}catch(_){} }
+let authRecoveryExhausted=false;
+function sessionStore(){try{return typeof window!=='undefined'?window.sessionStorage:null;}catch(_){return null;}}
+function tokenSnapshot(){
+ let currentToken='',decoded=null;try{currentToken=liff.getIDToken()||'';}catch(_){}try{decoded=liff.getDecodedIDToken();}catch(_){}
+ const exp=decoded&&decoded.exp,expValid=typeof exp==='number'&&Number.isFinite(exp)&&exp>0,tokenPresent=typeof currentToken==='string'&&currentToken.length>0,now=Date.now()/1000;
+ let reason='TOKEN_VALID',expiredSeconds=null;if(!tokenPresent)reason='TOKEN_NOT_FOUND';else if(!expValid)reason='EXP_INVALID';else if(exp<=now){reason='TOKEN_EXPIRED';expiredSeconds=Math.floor(now-exp);}
+ token=currentToken;clientTokenDiagnostic={tokenPresent,reason,expiredSeconds,audMatches:!!decoded&&String(decoded.aud)==='2012227652',issMatches:!!decoded&&decoded.iss==='https://access.line.me',expValid:expValid&&exp>now,subPresent:!!decoded&&typeof decoded.sub==='string'&&decoded.sub.length>0,iatValid:!!decoded&&Number.isSafeInteger(decoded.iat)&&decoded.iat>0&&decoded.iat<=now+60};
+ return {valid:reason==='TOKEN_VALID',reason};
+}
+function recoveryError(code,message){const error=Error(message);error.code=code;return error;}
+function expiredRecoveryFailure(){authRecoveryExhausted=true;return recoveryError('TOKEN_EXPIRED_RECOVERY_FAILED','LINEの本人確認情報の有効期限が切れています。安全のため、勤怠データの取得・保存は行っていません。\n\nLINEアプリのトークから勤怠を開き直してください。');}
+function beginExpiredTokenRecovery(){
+ if(authRecoveryExhausted)throw expiredRecoveryFailure();
+ const storage=sessionStore();if(!storage)throw expiredRecoveryFailure();
+ try{if(storage.getItem(AUTH_RECOVERY_SESSION_KEY))throw expiredRecoveryFailure();}catch(error){if(error&&error.code==='TOKEN_EXPIRED_RECOVERY_FAILED')throw error;throw expiredRecoveryFailure();}
+ let inLiffBrowser=false;try{inLiffBrowser=liff.isInClient();}catch(_){throw expiredRecoveryFailure();}
+ try{storage.setItem(AUTH_RECOVERY_SESSION_KEY,inLiffBrowser?'liff-reload':'line-login');}catch(_){throw expiredRecoveryFailure();}
+ authRecoveryExhausted=true;
+ try{
+  if(inLiffBrowser){window.location.reload();throw recoveryError('AUTH_RECOVERY_NAVIGATING','認証を再確認しています…');}
+  if(liff.isLoggedIn())liff.logout();
+  liff.login({redirectUri:window.location.href});
+  throw recoveryError('AUTH_RECOVERY_NAVIGATING','LINEのログイン画面へ移動しています…');
+ }catch(error){if(error&&error.code==='AUTH_RECOVERY_NAVIGATING')throw error;throw expiredRecoveryFailure();}
+}
+async function ensureFreshIdToken(){
+ const state=tokenSnapshot();if(state.valid)return;
+ if(state.reason==='TOKEN_EXPIRED')beginExpiredTokenRecovery();
+ throw recoveryError('AUTHENTICATION_FAILED','LINE本人確認情報を取得できません。');
+}
 async function api(fields,phase='attendance'){
  const safePhase=CLIENT_DIAGNOSTIC_PHASES.has(phase)?phase:'attendance';
+ await ensureFreshIdToken();
  diagnostic('start','開始');diagnostic('fetch','実行中');diagnostic('http','未取得');diagnostic('json','未実行');diagnostic('gas','未判定');
  const body=new URLSearchParams({id_token:token,...fields}),controller=new AbortController();const timer=setTimeout(()=>controller.abort(),REQUEST_TIMEOUT_MS);
  try{
@@ -119,7 +151,7 @@ async function api(fields,phase='attendance'){
   return result;
  }finally{clearTimeout(timer);}
 }
-function showConnectionError(message=LOAD_ERROR,code='',diagnosticCode='',httpStatus=null,verifyRequest=null){attendancePanel.hidden=false;attendancePanel.classList.add('connection-error');connectionError.hidden=false;const authFailed=code==='AUTHENTICATION_FAILED';const safeDiagnostic=AUTH_FAILURE_DIAGNOSTIC_CODES.has(diagnosticCode);const safeHttpStatus=Number.isInteger(httpStatus)&&httpStatus>=100&&httpStatus<=599;connectionErrorHeading.textContent=authFailed?'認証できませんでした':'通信エラーが発生しました。';connectionErrorMessage.textContent=authFailed?'LINEアカウントの認証を確認できませんでした。\n\nLINEアプリから開き直してください。':message;authErrorCode.hidden=!authFailed;authDiagnosticCode.hidden=!authFailed||!diagnosticEnabled||!safeDiagnostic;authDiagnosticCode.textContent=authDiagnosticCode.hidden?'':'診断コード：'+diagnosticCode;authHttpStatus.hidden=!authFailed||!diagnosticEnabled||diagnosticCode!=='VERIFY_HTTP_ERROR'||!safeHttpStatus;authHttpStatus.textContent=authHttpStatus.hidden?'':'HTTPステータス：'+httpStatus;authDetails.hidden=!authFailed||!diagnosticEnabled;renderAuthDetails(verifyRequest);list.replaceChildren();status.textContent='';}
+function showConnectionError(message=LOAD_ERROR,code='',diagnosticCode='',httpStatus=null,verifyRequest=null){attendancePanel.hidden=false;attendancePanel.classList.add('connection-error');connectionError.hidden=false;const authFailed=code==='AUTHENTICATION_FAILED',recoveryFailed=code==='TOKEN_EXPIRED_RECOVERY_FAILED';const safeDiagnostic=AUTH_FAILURE_DIAGNOSTIC_CODES.has(diagnosticCode);const safeHttpStatus=Number.isInteger(httpStatus)&&httpStatus>=100&&httpStatus<=599;connectionErrorHeading.textContent=recoveryFailed?'認証を復旧できませんでした':authFailed?'認証できませんでした':'通信エラーが発生しました。';connectionErrorMessage.textContent=recoveryFailed?message:authFailed?'LINEアカウントの認証を確認できませんでした。\n\nLINEアプリから開き直してください。':message;authErrorCode.hidden=!authFailed&&!recoveryFailed;authDiagnosticCode.hidden=!authFailed||!diagnosticEnabled||!safeDiagnostic;authDiagnosticCode.textContent=authDiagnosticCode.hidden?'':'診断コード：'+diagnosticCode;authHttpStatus.hidden=!authFailed||!diagnosticEnabled||diagnosticCode!=='VERIFY_HTTP_ERROR'||!safeHttpStatus;authHttpStatus.textContent=authHttpStatus.hidden?'':'HTTPステータス：'+httpStatus;authDetails.hidden=(!authFailed&&!recoveryFailed)||!diagnosticEnabled;renderAuthDetails(verifyRequest);list.replaceChildren();status.textContent='';}
 function renderAuthDetails(verifyRequest){
  const d=clientTokenDiagnostic||{};
  authTokenReason.textContent=d.reason||'未確認';
@@ -165,8 +197,8 @@ function render(data){
  }
  entryCard.hidden=true;renderManagerRecords(Array.isArray(data.records)?data.records:[]);
 }
-function entryOutcomeMatches(data,type,previous,startTime,endTime){
- if(!data||data.actorRole!=='employee'||!data.selfShift||data.workDate!==workDateInput.value)return false;
+function entryOutcomeMatches(data,type,previous,expectedWorkDate,startTime,endTime){
+ if(!data||data.actorRole!=='employee'||!data.selfShift||data.workDate!==expectedWorkDate)return false;
  const value=data.selfShift,schedule=value.schedule||null,attendance=value.attendance||null;
  if(type==='delete')return schedule===null&&attendance===null;
  if(!schedule||schedule.startTime!==startTime||schedule.endTime!==endTime||value.revision!==previous.revision+1)return false;
@@ -183,8 +215,12 @@ async function mutateEntry(type){
  const saveDate=workDateInput.value,startTime=type==='delete'?'':startTimeInput.value,endTime=type==='delete'?'':endTimeInput.value,operation=type==='delete'?'delete':(current.schedule?'update':'create');
  busy=true;workDateInput.disabled=true;retry.disabled=true;applyWriteMode();setLoading(true,type==='delete'?'勤務情報を削除しています…':'勤務情報を保存しています…');let failure=null;
  try{await api({action:'shiftMutation',type:operation,requestId,employeeId:current.employeeId,workDate:saveDate,expectedRevision:String(current.revision),startTime,endTime},'mutation');}catch(err){failure=err;}
+ if(failure&&['AUTH_RECOVERY_NAVIGATING','TOKEN_EXPIRED_RECOVERY_FAILED','AUTHENTICATION_FAILED'].includes(failure.code)){
+  if(failure.code!=='AUTH_RECOVERY_NAVIGATING')showConnectionError(failure.code==='TOKEN_EXPIRED_RECOVERY_FAILED'?failure.message:messages.AUTHENTICATION_FAILED,failure.code);
+  busy=false;workDateInput.disabled=false;retry.disabled=false;applyWriteMode();setLoading(false);return;
+ }
  const refreshed=await load(false,'readback');
- if(refreshed&&entryOutcomeMatches(refreshed,type,current,startTime,endTime)){clearConnectionError();status.textContent=type==='delete'?'シフト予定と勤怠実績の削除を再取得で確認しました。':'保存結果をシフト表・勤怠表の再取得で確認しました。';}
+ if(refreshed&&entryOutcomeMatches(refreshed,type,current,saveDate,startTime,endTime)){clearConnectionError();status.textContent=type==='delete'?'シフト予定と勤怠実績の削除を再取得で確認しました。':'保存結果をシフト表・勤怠表の再取得で確認しました。';}
  else if(refreshed&&failure&&failure.code&&failure.code!=='OUTCOME_UNKNOWN'&&failure.code!=='ROLLBACK_FAILED'&&failure.code!=='UNAVAILABLE'){clearConnectionError();status.textContent=failure.message||messages[failure.code]||'処理できませんでした。';}
  else{const unknown=type==='delete'?DELETE_UNKNOWN_ERROR:SAVE_UNKNOWN_ERROR;showConnectionError(unknown);}
  busy=false;workDateInput.disabled=false;retry.disabled=false;applyWriteMode();setLoading(false);
@@ -215,9 +251,10 @@ async function load(show=true,diagnosticPhase='attendance'){
  }catch(e){
   if(sequence!==requestSequence||selectedDate!==workDateInput.value)return null;
   diagnostic('processing','失敗（'+processingStage+'）');
+  if(e.code==='AUTH_RECOVERY_NAVIGATING')return null;
   if(e.code==='DISABLED'){attendancePanel.hidden=false;enrollmentPanel.hidden=true;entryState=null;entryCard.hidden=true;list.replaceChildren();shiftWritesEnabled=false;attendanceWritesEnabled=false;dateClass='invalid';clearConnectionError();status.textContent=e.message;return null;}
   if(e.code==='AUTHORIZATION_DENIED'){list.replaceChildren();attendancePanel.hidden=true;enrollmentPanel.hidden=false;enrollmentStatus.textContent='';retry.hidden=true;return null;}
-  list.replaceChildren();showConnectionError(e.code==='AUTHENTICATION_FAILED'?messages.AUTHENTICATION_FAILED:LOAD_ERROR,e.code,e.diagnosticCode,e.httpStatus,e.verifyRequest);return null;
+  list.replaceChildren();showConnectionError(e.code==='AUTHENTICATION_FAILED'?messages.AUTHENTICATION_FAILED:e.code==='TOKEN_EXPIRED_RECOVERY_FAILED'?e.message:LOAD_ERROR,e.code,e.diagnosticCode,e.httpStatus,e.verifyRequest);return null;
  }finally{if(sequence===requestSequence)setLoading(false);}
 }
 document.getElementById('enrollment').addEventListener('submit',async e=>{
@@ -230,10 +267,10 @@ document.getElementById('enrollment').addEventListener('submit',async e=>{
   input.value='';enrollmentPanel.hidden=true;attendancePanel.hidden=false;
   setLoading(true,'勤怠情報を読み込んでいます…');
   await load();
- }catch(err){enrollmentStatus.textContent=err.code==='DISABLED'?err.message:(err.message||'利用登録を確認できませんでした。')+' 登録結果が不明な場合は管理者に確認してください。';}
+ }catch(err){if(err.code==='TOKEN_EXPIRED_RECOVERY_FAILED')showConnectionError(err.message,err.code);else if(err.code!=='AUTH_RECOVERY_NAVIGATING')enrollmentStatus.textContent=err.code==='DISABLED'?err.message:(err.message||'利用登録を確認できませんでした。')+' 登録結果が不明な場合は管理者に確認してください。';}
  finally{setLoading(false);busy=false;button.disabled=false;input.disabled=false;}
 });
-document.getElementById('retry').addEventListener('click',()=>{if(busy)return;if(liffReady)load();else start();});
+document.getElementById('retry').addEventListener('click',()=>{if(busy)return;if(authRecoveryExhausted){try{const storage=sessionStore();if(storage)storage.removeItem(AUTH_RECOVERY_SESSION_KEY);}catch(_){}authRecoveryExhausted=false;}if(liffReady)load();else start();});
 workDateInput.addEventListener('change',()=>{if(!busy)load();});
 entryForm.addEventListener('submit',async event=>{event.preventDefault();await mutateEntry('save');});
 deleteButton.addEventListener('click',()=>mutateEntry('delete'));
@@ -250,22 +287,19 @@ async function start(){
  if(busy)return;busy=true;setLoading(true,'LINEに接続しています…');
  try{
   await initializeLiff();
-  if(!liff.isLoggedIn()){liff.login();return;}
-  token=liff.getIDToken()||'';
-  let decodedIdToken=null;try{decodedIdToken=liff.getDecodedIDToken();}catch(_){}
-  const now=Date.now()/1000;
-  const exp=decodedIdToken&&decodedIdToken.exp;
-  const expValid=typeof exp==='number'&&Number.isFinite(exp)&&exp>0;
-  const tokenPresent=typeof token==='string'&&token.length>0;
-  let tokenReason='TOKEN_VALID',expiredSeconds=null;
-  if(!tokenPresent)tokenReason='TOKEN_NOT_FOUND';
-  else if(!expValid)tokenReason='EXP_INVALID';
-  else if(exp<=now){tokenReason='TOKEN_EXPIRED';expiredSeconds=Math.floor(now-exp);}
-  clientTokenDiagnostic={tokenPresent,reason:tokenReason,expiredSeconds,audMatches:!!decodedIdToken&&String(decodedIdToken.aud)==='2012227652',issMatches:!!decodedIdToken&&decodedIdToken.iss==='https://access.line.me',expValid:expValid&&exp>now,subPresent:!!decodedIdToken&&typeof decodedIdToken.sub==='string'&&decodedIdToken.sub.length>0,iatValid:!!decodedIdToken&&Number.isSafeInteger(decodedIdToken.iat)&&decodedIdToken.iat>0&&decodedIdToken.iat<=now+60};
-  if(tokenReason!=='TOKEN_VALID'){const error=Error('LINE本人確認情報を取得できません。');error.code='AUTHENTICATION_FAILED';throw error;}
+  const storage=sessionStore();let recoveryPending=false;try{recoveryPending=!!storage&&!!storage.getItem(AUTH_RECOVERY_SESSION_KEY);}catch(_){throw expiredRecoveryFailure();}
+  if(!liff.isLoggedIn()){
+   if(recoveryPending)throw expiredRecoveryFailure();
+   liff.login();throw recoveryError('AUTH_RECOVERY_NAVIGATING','LINEのログイン画面へ移動しています…');
+  }
+  const tokenState=tokenSnapshot();
+  if(recoveryPending){
+   if(tokenState.valid){try{storage.removeItem(AUTH_RECOVERY_SESSION_KEY);}catch(_){}authRecoveryExhausted=false;}
+   else throw expiredRecoveryFailure();
+  }else if(!tokenState.valid){if(tokenState.reason==='TOKEN_EXPIRED')beginExpiredTokenRecovery();throw recoveryError('AUTHENTICATION_FAILED','LINE本人確認情報を取得できません。');}
   liffReady=true;
   await load();
- }catch(e){enrollmentPanel.hidden=true;showConnectionError(e.code==='AUTHENTICATION_FAILED'?messages.AUTHENTICATION_FAILED:LOAD_ERROR,e.code,e.diagnosticCode,e.httpStatus,e.verifyRequest);}
+ }catch(e){if(e.code!=='AUTH_RECOVERY_NAVIGATING'){enrollmentPanel.hidden=true;showConnectionError(e.code==='AUTHENTICATION_FAILED'?messages.AUTHENTICATION_FAILED:e.code==='TOKEN_EXPIRED_RECOVERY_FAILED'?e.message:LOAD_ERROR,e.code,e.diagnosticCode,e.httpStatus,e.verifyRequest);}}
  finally{busy=false;setLoading(false);}
 }
 start();
