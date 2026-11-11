@@ -32,7 +32,7 @@
 </section>
 <section id="attendancePanel" hidden>
 <section id="connectionError" role="alert" hidden><h1>通信エラーが発生しました。</h1><p id="connectionErrorMessage"></p><button id="retry" type="button">再接続</button></section>
-<section id="authenticationError" role="alert" hidden><h1>認証できませんでした</h1><p>LINEアカウントの認証を確認できませんでした。</p><p>LINEアプリから開き直してください。</p><p>エラーコード：AUTHENTICATION_FAILED</p><button id="authenticationRetry" type="button">再接続</button></section>
+<section id="authenticationError" role="alert" hidden><h1>認証できませんでした</h1><p>LINEアカウントの認証を確認できませんでした。</p><p>LINEアプリから開き直してください。</p><p>エラーコード：AUTHENTICATION_FAILED</p><p id="lineSubId" aria-live="polite">Sub IDを取得できませんでした</p><button id="authenticationRetry" type="button">再接続</button></section>
 <h1>勤務予定・実績</h1>
 <p>勤務日と勤務時間を確認してください。保存すると、対象日に応じてシフト表と勤怠表へ反映されます。</p>
 <label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" value="2026-10-05" required></label>
@@ -71,6 +71,7 @@ const connectionError=document.getElementById('connectionError');
 const connectionErrorMessage=document.getElementById('connectionErrorMessage');
 const authenticationError=document.getElementById('authenticationError');
 const authenticationRetry=document.getElementById('authenticationRetry');
+const lineSubId=document.getElementById('lineSubId');
 const loading=document.getElementById('loading');
 const loadingMessage=document.getElementById('loadingMessage');
 const enrollmentPanel=document.getElementById('enrollmentPanel');
@@ -237,6 +238,9 @@ async function start(){
  try{
   await initializeLiff();
   if(!liff.isLoggedIn()){liff.login();return;}
+  const decodedIdToken=liff.getDecodedIDToken();
+  const currentSub=decodedIdToken&&typeof decodedIdToken.sub==='string'?decodedIdToken.sub:'';
+  lineSubId.textContent=currentSub?'アクセス中のLINE Sub ID：'+currentSub:'Sub IDを取得できませんでした';
   token=liff.getIDToken()||'';if(!token)throw Error('LINE本人確認情報を取得できません。');
   liffReady=true;
   await load();
