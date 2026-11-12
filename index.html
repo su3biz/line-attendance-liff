@@ -207,7 +207,7 @@ function render(data){
   const schedule=normalizeSchedule(value.schedule),attendance=normalizeAttendance(value.attendance);if(!['today','past','future'].includes(dateClass))throw Error('date class');
   entryState={employeeId:value.employeeId,attendanceEmployeeId:value.attendanceEmployeeId||'',displayName:value.displayName,revision:value.revision,schedule,attendance,attendanceRevision:Number.isSafeInteger(value.attendanceRevision)?value.attendanceRevision:0};
   employeeName.textContent=entryState.displayName;plannedTime.textContent=schedule?'予定: '+rangeText(schedule.startTime,schedule.endTime,schedule.endTime<schedule.startTime):'シフト予定は未登録です。';
-  const selected=attendance||schedule;startTimeInput.value=selected?selected.startTime:'';endTimeInput.value=selected?selected.endTime:'';entryCard.hidden=false;applyWriteMode();return;
+  startTimeInput.value=attendance?attendance.startTime:'';endTimeInput.value=attendance?attendance.endTime:'';entryCard.hidden=false;applyWriteMode();return;
  }
  entryCard.hidden=true;renderManagerRecords(Array.isArray(data.records)?data.records:[]);
 }
