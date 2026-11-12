@@ -31,8 +31,8 @@ function makePage(search, options = {}) {
   return { context, get, storage, location };
 }
 
-test('DEV diagnostic code appears on the authentication error screen only with explicit opt-in', () => {
-  const page = makePage('?authDiagnostics=DEV');
+test('DEV diagnostic code appears on the authentication error screen without a query flag', () => {
+  const page = makePage('');
   vm.runInContext("showConnectionError('', 'AUTHENTICATION_FAILED', 'VERIFY_HTTP_ERROR', 400)", page.context);
   assert.equal(page.get('authDiagnosticCode').hidden, false);
   assert.equal(page.get('authDiagnosticCode').textContent, '診断コード：VERIFY_HTTP_ERROR');
@@ -45,11 +45,14 @@ test('DEV diagnostic code appears on the authentication error screen only with e
   assert.equal(page.get('authHttpStatus').hidden, true);
 });
 
-test('diagnostic code stays hidden by default', () => {
+test('DEV diagnostics are enabled by the fixed DEV LIFF and GAS configuration', () => {
   const page = makePage('');
   vm.runInContext("showConnectionError('', 'AUTHENTICATION_FAILED', 'VERIFY_HTTP_ERROR', 400)", page.context);
-  assert.equal(page.get('authDiagnosticCode').hidden, true);
-  assert.equal(page.get('authHttpStatus').hidden, true);
+  assert.equal(page.get('authDiagnosticCode').hidden, false);
+  assert.equal(page.get('authHttpStatus').hidden, false);
+  assert.match(script, /const diagnosticEnabled=LIFF_ID==='2012227652-CgVMkyBb'&&GAS_URL==='https:\/\/script\.google\.com\/macros\/s\/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS\/exec'/);
+  const demo = fs.readFileSync(path.join(__dirname, '..', 'demo', 'index.html'), 'utf8');
+  assert.doesNotMatch(demo, /DEV接続トレース|authDiagnostics/);
 });
 
 test('DEV trace preserves ordered stages with elapsed time and sanitized details on the error screen', () => {
@@ -62,9 +65,9 @@ test('DEV trace preserves ordered stages with elapsed time and sanitized details
   assert.equal(output.includes('authorization-code'), false);
   assert.doesNotMatch(script, /item\.detail/, 'server-supplied descriptions are not copied into the diagnostic panel');
   assert.equal(page.get('diagnostics').hidden, false);
-  const standard = makePage('');
-  vm.runInContext("trace('post','失敗','safe')", standard.context);
-  assert.equal(standard.get('traceOutput').textContent, '');
+  const defaultDev = makePage('');
+  vm.runInContext("trace('post','失敗','safe')", defaultDev.context);
+  assert.match(defaultDev.get('traceOutput').textContent, /post  失敗  safe/);
 });
 
 test('DEV error screen merges safe server stages and elapsed time without server detail text', async () => {
@@ -92,8 +95,32 @@ test('DEV error screen merges safe server stages and elapsed time without server
   const output = page.get('traceOutput').textContent;
   assert.match(output, /gas_attendance_open_sheets  開始  server 2ms/);
   assert.match(output, /gas_attendance_open_sheets  失敗  server 4ms/);
+  assert.match(output, /api_result  失敗  code UNAVAILABLE/);
   assert.equal(output.includes('private employee identifier'), false);
   assert.equal(output.includes('secret exception text'), false);
+});
+
+test('authentication failure trace includes API and verifier error codes on the same screen', async () => {
+  const page = makePage('');
+  page.context.liff = {
+    getIDToken: () => 'synthetic-id-token',
+    getDecodedIDToken: () => ({ exp: Math.floor(Date.now() / 1000) + 300 }),
+  };
+  page.context.fetch = async () => ({
+    ok: true, status: 200, redirected: false,
+    json: async () => ({ ok: false, code: 'AUTHENTICATION_FAILED', diagnosticCode: 'VERIFY_HTTP_ERROR', httpStatus: 400, trace: [{ stage: 'line_verify', state: '失敗', ms: 9, detail: 'ignored sensitive server detail' }] }),
+  });
+  await assert.rejects(page.context.api({ action: 'attendanceList', workDate: '2026-11-12' }), (error) => {
+    page.context.showConnectionError('', error.code, error.diagnosticCode, error.httpStatus);
+    return error.code === 'AUTHENTICATION_FAILED';
+  });
+  const output = page.get('traceOutput').textContent;
+  assert.match(output, /api_result  失敗  code AUTHENTICATION_FAILED/);
+  assert.match(output, /auth_verify  失敗  code VERIFY_HTTP_ERROR \/ HTTP 400/);
+  assert.match(output, /error_code  失敗  code AUTHENTICATION_FAILED/);
+  assert.match(output, /gas_line_verify  失敗  server 9ms/);
+  assert.equal(output.includes('ignored sensitive server detail'), false);
+  assert.equal(page.get('diagnostics').hidden, false);
 });
 
 test('authentication failure uses the existing error panel, reconnect control, and value-free diagnostics', async () => {
