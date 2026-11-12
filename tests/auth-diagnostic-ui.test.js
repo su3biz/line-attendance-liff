@@ -60,6 +60,7 @@ test('DEV trace preserves ordered stages with elapsed time and sanitized details
   assert.match(output, /03  \+\d+ms  post  失敗/);
   assert.equal(output.includes('token-value'), false);
   assert.equal(output.includes('authorization-code'), false);
+  assert.doesNotMatch(script, /item\.detail/, 'server-supplied descriptions are not copied into the diagnostic panel');
   assert.equal(page.get('diagnostics').hidden, false);
   const standard = makePage('');
   vm.runInContext("trace('post','失敗','safe')", standard.context);
