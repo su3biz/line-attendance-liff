@@ -262,7 +262,7 @@ async function load(show=true,diagnosticPhase='attendance'){
   shiftWritesEnabled=typeof data.shiftWritesEnabled==='boolean'?data.shiftWritesEnabled:legacyWrites;
   attendanceWritesEnabled=typeof data.attendanceWritesEnabled==='boolean'?data.attendanceWritesEnabled:legacyWrites;
   processingStage='画面パネルの切替';diagnostic('processing',processingStage);
-  enrollmentPanel.hidden=true;attendancePanel.hidden=false;processingStage='描画呼び出し';diagnostic('processing',processingStage);diagnostic('render','実行中');try{render(data);diagnostic('render','成功');}catch(renderError){diagnostic('render','失敗');throw renderError;}processingStage='描画後の操作状態更新';diagnostic('processing',processingStage);applyWriteMode();
+  enrollmentPanel.hidden=true;attendancePanel.hidden=false;processingStage='描画呼び出し';diagnostic('processing',processingStage);diagnostic('render','実行中');try{render(data);diagnostic('render','成功');}catch(renderError){diagnostic('render','失敗');const safeErrorType=['Error','TypeError','RangeError','ReferenceError','SyntaxError','URIError','EvalError'].includes(renderError&&renderError.name)?renderError.name:'Other';trace('render_error','情報','type '+safeErrorType);throw renderError;}processingStage='描画後の操作状態更新';diagnostic('processing',processingStage);applyWriteMode();
   processingStage='画面メッセージ更新';diagnostic('processing',processingStage);
   if(show&&!status.textContent)status.textContent=!shiftWritesEnabled?'勤務情報の更新は停止中です。':(data.actorRole==='manager'?(data.records.length?data.records.length+'名分の勤務情報を表示しています。':''):'');
   diagnostic('processing','完了');trace('initial_data','成功','処理完了');trace('render_complete','成功','画面更新完了');
