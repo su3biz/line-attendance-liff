@@ -12,7 +12,7 @@ assert.ok(match, 'inline LIFF script exists');
 function element() {
   return {
     value: '', textContent: '', type: '', required: false, disabled: false, hidden: false,
-    children: [], handlers: {}, attributes: {}, classList: { add() {}, remove() {} },
+    children: [], handlers: {}, attributes: {}, className: '', classList: { add() {}, remove() {} },
     addEventListener(name, handler) { this.handlers[name] = handler; },
     appendChild(child) { this.children.push(child); return child; },
     append(...children) { this.children.push(...children); },
@@ -21,24 +21,43 @@ function element() {
   };
 }
 
-function makePage({ initialState, confirm = true, mutationFailure = null, responseWorkDate = null, disabledActions = [], writesEnabled = true, shiftWritesEnabled, attendanceWritesEnabled, attendanceRecords = [] } = {}) {
+function makePage({ initialState, confirm = true, mutationFailure = null, responseWorkDate = null, dateClass = 'future', disabledActions = [], shiftWritesEnabled = true, attendanceWritesEnabled = true, attendanceRecords = [] } = {}) {
   const elements = new Map();
   const requests = [];
+  const confirmMessages = [];
+  const stored = new Map();
   let id = 0;
   const get = (name) => {
     if (!elements.has(name)) elements.set(name, element());
     return elements.get(name);
   };
   const nextState = { ...initialState };
+  const location = { href: 'https://example.test/liff', search: '', reload() {} };
   const context = vm.createContext({
     document: {
       getElementById: get,
       createElement: element,
       createTextNode: (textContent) => ({ textContent }),
     },
-    window: { confirm: () => confirm },
-    URL, URLSearchParams, Error, AbortController, setTimeout, clearTimeout,
+    window: {
+      confirm(message) { confirmMessages.push(message); return confirm; },
+      location,
+      sessionStorage: {
+        getItem(key) { return stored.has(key) ? stored.get(key) : null; },
+        setItem(key, value) { stored.set(key, String(value)); },
+        removeItem(key) { stored.delete(key); },
+      },
+    },
+    location, URL, URLSearchParams, Error, AbortController, Set, Intl, Date,
+    setTimeout, clearTimeout,
     crypto: { randomUUID: () => `request-${String(++id).padStart(4, '0')}` },
+    liff: {
+      isLoggedIn: () => true,
+      isInClient: () => true,
+      getIDToken: () => 'test-line-id-token',
+      getDecodedIDToken: () => ({ exp: Math.floor(Date.now() / 1000) + 3600 }),
+      init: async () => {}, login() { throw new Error('valid-token fixture must not log in'); }, logout() {},
+    },
     fetch: async (_url, options) => {
       const fields = Object.fromEntries(new URLSearchParams(options.body).entries());
       requests.push(fields);
@@ -47,6 +66,8 @@ function makePage({ initialState, confirm = true, mutationFailure = null, respon
         if (mutationFailure === 'before') throw new Error('simulated request failure');
         nextState.revision = Number(fields.expectedRevision) + 1;
         nextState.schedule = fields.type === 'delete' ? null : { startTime: fields.startTime, endTime: fields.endTime };
+        if (fields.type === 'delete') nextState.attendance = null;
+        else if (dateClass !== 'future') nextState.attendance = { startTime: fields.startTime, endTime: fields.endTime };
         if (mutationFailure === 'after-switch') get('workDate').value = '2026-10-06';
         if (mutationFailure === 'after' || mutationFailure === 'after-switch') throw new Error('simulated lost response');
         return { ok: true, json: async () => ({ ok: true, code: 'SAVED' }) };
@@ -55,53 +76,47 @@ function makePage({ initialState, confirm = true, mutationFailure = null, respon
         if (disabledActions.includes('register')) return { ok: true, json: async () => ({ ok: false, code: 'DISABLED' }) };
         throw new Error('unexpected register action');
       }
-      if (fields.action === 'saveActual') {
-        if (disabledActions.includes('saveActual')) return { ok: true, json: async () => ({ ok: false, code: 'DISABLED' }) };
-        return { ok: true, json: async () => ({ ok: true, code: 'SAVED' }) };
-      }
       if (fields.action === 'attendanceList') {
         if (disabledActions.includes('attendanceList')) return { ok: true, json: async () => ({ ok: false, code: 'DISABLED' }) };
-        return { ok: true, json: async () => ({ ok: true, records: attendanceRecords, actorRole: 'employee', workDate: responseWorkDate || fields.workDate, selfShift: nextState, writesEnabled, ...(typeof shiftWritesEnabled === 'boolean' ? { shiftWritesEnabled } : {}), ...(typeof attendanceWritesEnabled === 'boolean' ? { attendanceWritesEnabled } : {}) }) };
+        return {
+          ok: true,
+          json: async () => ({
+            ok: true, records: attendanceRecords, actorRole: 'employee', workDate: responseWorkDate || fields.workDate,
+            dateClass, selfShift: nextState, shiftWritesEnabled, attendanceWritesEnabled,
+          }),
+        };
       }
       throw new Error(`unexpected action ${fields.action}`);
     },
   });
   const script = match[1].replace(/\nstart\(\);\s*$/, '\n');
   vm.runInContext(script, context);
-  vm.runInContext("token='test-line-id-token'", context);
   get('workDate').value = '2026-10-05';
-  get('shiftStart').value = initialState?.schedule?.startTime || '09:00';
-  get('shiftEnd').value = initialState?.schedule?.endTime || '17:00';
-  return { context, get, requests };
+  return { context, get, requests, confirmMessages };
 }
 
-test('employee can create a shift using the authenticated identity and current revision', async () => {
-  const state = { employeeId: 'EMP-01', revision: 2, schedule: null };
-  const page = makePage({ initialState: state });
+test('employee can create a shift through the current entry form with the authenticated identity and revision', async () => {
+  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 2, schedule: null, attendance: null } });
   await page.context.load(false);
-  page.get('shiftStart').value = '09:00';
-  page.get('shiftEnd').value = '17:00';
-  await page.get('shiftForm').handlers.submit({ preventDefault() {} });
+  page.get('startTime').value = '09:00';
+  page.get('endTime').value = '17:00';
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
   const request = page.requests.find((item) => item.action === 'shiftMutation');
   assert.deepEqual(request, {
     id_token: 'test-line-id-token', action: 'shiftMutation', type: 'create', employeeId: 'EMP-01', workDate: '2026-10-05',
     expectedRevision: '2', requestId: 'request-0001', startTime: '09:00', endTime: '17:00',
   });
   assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 2);
-  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('shiftState', page.context))), {
-    employeeId: 'EMP-01', revision: 3, schedule: { startTime: '09:00', endTime: '17:00' },
-  });
-  assert.equal(page.get('shiftSaveButton').textContent, 'シフトを変更');
-  assert.equal(page.get('shiftDeleteButton').hidden, false);
+  assert.equal(vm.runInContext('entryState.revision', page.context), 3);
+  assert.equal(page.get('saveButton').disabled, false);
 });
 
-test('employee can update a shift with its current revision', async () => {
-  const state = { employeeId: 'EMP-01', revision: 4, schedule: { startTime: '09:00', endTime: '17:00' } };
-  const page = makePage({ initialState: state });
+test('employee update uses the current schedule revision', async () => {
+  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 4, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null } });
   await page.context.load(false);
-  page.get('shiftStart').value = '10:00';
-  page.get('shiftEnd').value = '18:00';
-  await page.get('shiftForm').handlers.submit({ preventDefault() {} });
+  page.get('startTime').value = '10:00';
+  page.get('endTime').value = '18:00';
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
   const request = page.requests.find((item) => item.action === 'shiftMutation');
   assert.equal(request.type, 'update');
   assert.equal(request.expectedRevision, '4');
@@ -109,178 +124,192 @@ test('employee can update a shift with its current revision', async () => {
   assert.equal(request.endTime, '18:00');
 });
 
-test('shift deletion asks for confirmation and sends no request when cancelled', async () => {
-  const state = { employeeId: 'EMP-01', revision: 1, schedule: { startTime: '09:00', endTime: '17:00' } };
-  const page = makePage({ initialState: state, confirm: false });
+test('shift deletion asks for confirmation and sends no mutation when cancelled', async () => {
+  const page = makePage({ confirm: false, initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null } });
   await page.context.load(false);
-  await page.get('shiftDeleteButton').handlers.click();
+  await page.get('deleteButton').handlers.click();
   assert.equal(page.requests.some((item) => item.action === 'shiftMutation'), false);
 });
 
-test('confirmed shift deletion sends a delete mutation with the current revision', async () => {
-  const state = { employeeId: 'EMP-01', revision: 1, schedule: { startTime: '09:00', endTime: '17:00' } };
-  const page = makePage({ initialState: state, confirm: true });
+test('confirmed deletion sends one revisioned mutation and verifies by rereading attendanceList', async () => {
+  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: { startTime: '08:55', endTime: '17:05' } } });
   await page.context.load(false);
-  await page.get('shiftDeleteButton').handlers.click();
+  await page.get('deleteButton').handlers.click();
+  assert.match(page.confirmMessages[0], /2026-10-05/);
+  assert.match(page.confirmMessages[0], /シフト表・勤怠実績/);
   const request = page.requests.find((item) => item.action === 'shiftMutation');
   assert.equal(request.type, 'delete');
   assert.equal(request.expectedRevision, '1');
   assert.equal(request.startTime, '');
   assert.equal(request.endTime, '');
   assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 2);
-  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('shiftState', page.context))), {
-    employeeId: 'EMP-01', revision: 2, schedule: null,
-  });
-  assert.equal(page.get('shiftSaveButton').textContent, 'シフトを登録');
-  assert.equal(page.get('shiftDeleteButton').hidden, true);
-});
-
-test('a lost response is resolved by rereading the exact resulting revision without resending', async () => {
-  const state = { employeeId: 'EMP-01', revision: 0, schedule: null };
-  const page = makePage({ initialState: state, mutationFailure: 'after' });
-  await page.context.load(false);
-  page.get('shiftStart').value = '09:00';
-  page.get('shiftEnd').value = '17:00';
-  await page.get('shiftForm').handlers.submit({ preventDefault() {} });
-  assert.match(page.get('status').textContent, /保存済みであること/);
+  assert.equal(vm.runInContext('entryState.schedule', page.context), null);
+  assert.equal(vm.runInContext('entryState.attendance', page.context), null);
+  assert.match(page.get('status').textContent, /削除結果を再取得で確認しました/);
   assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
 });
 
-test('an unresolved mutation is not automatically resent after rereading unchanged state', async () => {
-  const state = { employeeId: 'EMP-01', revision: 0, schedule: null };
-  const page = makePage({ initialState: state, mutationFailure: 'before' });
+test('actual-only day can delete the actual record and preserve the empty schedule', async () => {
+  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: { startTime: '08:55', endTime: '17:05' } } });
   await page.context.load(false);
-  page.get('shiftStart').value = '09:00';
-  page.get('shiftEnd').value = '17:00';
-  await page.get('shiftForm').handlers.submit({ preventDefault() {} });
-  assert.match(page.get('status').textContent, /再送せず/);
+  assert.equal(page.get('deleteButton').disabled, false);
+  await page.get('deleteButton').handlers.click();
+  assert.match(page.confirmMessages[0], /勤怠実績を削除/);
+  assert.doesNotMatch(page.confirmMessages[0], /シフト表・/);
+  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
+  assert.equal(vm.runInContext('entryState.schedule', page.context), null);
+  assert.equal(vm.runInContext('entryState.attendance', page.context), null);
+});
+
+test('empty day disables delete and preserves both empty records', async () => {
+  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await page.context.load(false);
+  assert.equal(page.get('deleteButton').disabled, true);
+  await page.get('deleteButton').handlers.click();
+  assert.equal(page.requests.some((item) => item.action === 'shiftMutation'), false);
+  assert.equal(vm.runInContext('entryState.schedule', page.context), null);
+  assert.equal(vm.runInContext('entryState.attendance', page.context), null);
+});
+
+test('all four cases display the specified source times and enable delete only when a target exists', async () => {
+  const cases = [
+    { schedule: null, attendance: null, displayed: null, planned: /未登録/, deleteDisabled: true },
+    { schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null, displayed: { startTime: '09:00', endTime: '17:00' }, planned: /09:00–17:00/, deleteDisabled: false },
+    { schedule: { startTime: '09:00', endTime: '17:00' }, attendance: { startTime: '08:55', endTime: '17:05' }, displayed: { startTime: '08:55', endTime: '17:05' }, planned: /09:00–17:00/, deleteDisabled: false },
+    { schedule: null, attendance: { startTime: '08:55', endTime: '17:05' }, displayed: { startTime: '08:55', endTime: '17:05' }, planned: /未登録/, deleteDisabled: false },
+  ];
+  for (const [index, state] of cases.entries()) {
+    const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, ...state } });
+    await page.context.load(false);
+    assert.match(page.get('plannedTime').textContent, state.planned, `case ${index + 1} planned row`);
+    assert.equal(page.get('startTime').value, state.displayed?.startTime || '', `case ${index + 1} start`);
+    assert.equal(page.get('endTime').value, state.displayed?.endTime || '', `case ${index + 1} end`);
+    assert.equal(page.get('deleteButton').disabled, state.deleteDisabled, `case ${index + 1} delete availability`);
+  }
+});
+
+test('schedule-only deletion clears schedule while attendance remains empty', async () => {
+  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null } });
+  await page.context.load(false);
+  await page.get('deleteButton').handlers.click();
+  assert.match(page.confirmMessages[0], /シフト表を削除/);
+  assert.doesNotMatch(page.confirmMessages[0], /勤怠実績を削除/);
+  assert.equal(vm.runInContext('entryState.schedule', page.context), null);
+  assert.equal(vm.runInContext('entryState.attendance', page.context), null);
+});
+
+test('past and today saves update both records while future saves preserve actual-only data', async () => {
+  for (const dateClass of ['past', 'today']) {
+    const page = makePage({ dateClass, initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+    await page.context.load(false);
+    page.get('startTime').value = '09:00'; page.get('endTime').value = '17:00';
+    await page.get('entryForm').handlers.submit({ preventDefault() {} });
+    assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.schedule', page.context))), { startTime: '09:00', endTime: '17:00' });
+    assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.attendance', page.context))), { startTime: '09:00', endTime: '17:00' });
+  }
+  const priorAttendance = { startTime: '08:55', endTime: '17:05' };
+  const future = makePage({ dateClass: 'future', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: priorAttendance } });
+  await future.context.load(false);
+  assert.equal(future.get('startTime').value, priorAttendance.startTime, 'case 4 displays actual times');
+  assert.equal(future.get('endTime').value, priorAttendance.endTime);
+  future.get('startTime').value = '10:00'; future.get('endTime').value = '18:00';
+  await future.get('entryForm').handlers.submit({ preventDefault() {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.schedule', future.context))), { startTime: '10:00', endTime: '18:00' });
+  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.attendance', future.context))), priorAttendance, 'future save leaves actual data unchanged');
+});
+
+test('a lost mutation response is resolved by rereading state without resending', async () => {
+  const page = makePage({ mutationFailure: 'after', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await page.context.load(false);
+  page.get('startTime').value = '09:00';
+  page.get('endTime').value = '17:00';
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
+  assert.match(page.get('status').textContent, /保存結果を.*再取得で確認しました/);
   assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
 });
 
-test('an ambiguous mutation is not confirmed from a different selected date', async () => {
-  const state = { employeeId: 'EMP-01', revision: 0, schedule: null };
-  const page = makePage({ initialState: state, mutationFailure: 'after-switch' });
+test('a mutation outcome is not confirmed from a different date selected during the request', async () => {
+  const page = makePage({ mutationFailure: 'after-switch', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
   await page.context.load(false);
-  page.get('shiftStart').value = '09:00';
-  page.get('shiftEnd').value = '17:00';
-  await page.get('shiftForm').handlers.submit({ preventDefault() {} });
-  assert.doesNotMatch(page.get('status').textContent, /保存済みであること/);
-  assert.match(page.get('status').textContent, /再送せず/);
+  page.get('startTime').value = '09:00';
+  page.get('endTime').value = '17:00';
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
+  assert.doesNotMatch(page.get('status').textContent, /再取得で確認しました/);
+  assert.match(page.get('connectionErrorMessage').textContent, /再保存せず/);
   assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
 });
 
-test('attendance state for a different date is rejected', async () => {
-  const page = makePage({ initialState: { employeeId: 'EMP-01', revision: 0, schedule: null }, responseWorkDate: '2026-10-06' });
+test('an unresolved mutation is not retried and reports the uncertain result', async () => {
+  const page = makePage({ mutationFailure: 'before', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await page.context.load(false);
+  page.get('startTime').value = '09:00';
+  page.get('endTime').value = '17:00';
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
+  assert.match(page.get('connectionErrorMessage').textContent, /再保存せず/);
+  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
+});
+
+test('response for a different work date is rejected and does not populate the entry state', async () => {
+  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null }, responseWorkDate: '2026-10-06' });
   const result = await page.context.load(false);
   assert.equal(result, null);
-  assert.equal(vm.runInContext('shiftState', page.context), null);
+  assert.equal(vm.runInContext('entryState', page.context), null);
+  assert.equal(page.get('connectionError').hidden, false);
 });
 
-test('DISABLED from attendanceList is shown as a disabled feature, not a connection failure', async () => {
-  const page = makePage({ initialState: { employeeId: 'EMP-01', revision: 0, schedule: null }, disabledActions: ['attendanceList'] });
-  page.get('attendancePanel').hidden = true;
-  page.get('enrollmentPanel').hidden = true;
+test('DISABLED attendance response is shown as a stopped feature, not a connection failure', async () => {
+  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null }, disabledActions: ['attendanceList'] });
   const result = await page.context.load(false);
   assert.equal(result, null);
   assert.equal(page.get('attendancePanel').hidden, false);
   assert.equal(page.get('connectionError').hidden, true);
-  assert.equal(page.get('connectionErrorMessage').textContent, '');
   assert.equal(page.get('status').textContent, '機能が停止中です。');
 });
 
-test('read-only response displays data but disables attendance and shift writes', async () => {
-  const page = makePage({
-    initialState: { employeeId: 'EMP-01', revision: 2, schedule: { startTime: '09:00', endTime: '17:00' } },
-    writesEnabled: false,
-    attendanceRecords: [{ employeeId: 'EMP-01', displayName: '本人', workDate: '2026-10-05', plannedStart: '09:00', plannedEnd: '17:00', plannedEndNextDay: false, actualStart: '09:00', actualEnd: '17:00', revision: 0, saved: false }],
-  });
-  const result = await page.context.load();
-  assert.equal(result.writesEnabled, false);
-  assert.equal(page.get('list').children.length, 1);
-  assert.equal(page.get('status').textContent, '現在は読み取り専用モードです。書き込み機能は停止中です。');
-  assert.equal(page.get('shiftStart').disabled, true);
-  assert.equal(page.get('shiftEnd').disabled, true);
-  assert.equal(page.get('shiftSaveButton').disabled, true);
-  assert.equal(page.get('shiftDeleteButton').disabled, true);
-  const form = page.get('list').children[0].children.find((child) => typeof child.handlers.submit === 'function');
-  assert.equal(form.children[0].children[1].disabled, true);
-  assert.equal(form.children[1].children[1].disabled, true);
-  assert.equal(form.children[2].disabled, true);
-  await form.handlers.submit({ preventDefault() {} });
-  await page.get('shiftForm').handlers.submit({ preventDefault() {} });
-  await page.get('shiftDeleteButton').handlers.click();
-  assert.equal(page.requests.filter((item) => ['saveActual', 'shiftMutation'].includes(item.action)).length, 0);
-});
-
-test('DISABLED from a shift mutation is not treated as an unknown or connection failure', async () => {
-  const page = makePage({ initialState: { employeeId: 'EMP-01', revision: 1, schedule: null }, disabledActions: ['shiftMutation'] });
-  await page.context.load();
-  await page.get('shiftForm').handlers.submit({ preventDefault() {} });
+test('DISABLED shift mutation is shown distinctly and never resends the mutation', async () => {
+  const page = makePage({ disabledActions: ['shiftMutation'], initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: null, attendance: null } });
+  await page.context.load(false);
+  page.get('startTime').value = '09:00';
+  page.get('endTime').value = '17:00';
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
   assert.equal(page.get('connectionError').hidden, true);
   assert.equal(page.get('status').textContent, '機能が停止中です。');
   assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
-  assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 1);
+  assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 2, 'the existing mutation flow performs one state readback');
 });
 
-test('DISABLED from attendance actual save is shown distinctly without retrying the read', async () => {
-  const page = makePage({
-    initialState: { employeeId: 'EMP-01', revision: 0, schedule: null },
-    disabledActions: ['saveActual'],
-    attendanceRecords: [{ employeeId: 'EMP-01', displayName: '本人', workDate: '2026-10-05', plannedStart: '09:00', plannedEnd: '17:00', plannedEndNextDay: false, actualStart: '09:00', actualEnd: '17:00', revision: 0, saved: false }],
-  });
-  await page.context.load();
-  const form = page.get('list').children[0].children.find((child) => typeof child.handlers.submit === 'function');
-  await form.handlers.submit({ preventDefault() {} });
-  assert.equal(page.get('connectionError').hidden, true);
-  assert.equal(page.get('status').textContent, '機能が停止中です。');
-  assert.equal(page.requests.filter((item) => item.action === 'saveActual').length, 1);
-  assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 1);
-});
-
-test('DISABLED registration is definitive and not reported as an unknown outcome', async () => {
-  const page = makePage({ initialState: { employeeId: 'EMP-01', revision: 0, schedule: null }, disabledActions: ['register'] });
+test('DISABLED registration is reported as a definitive result', async () => {
+  const page = makePage({ disabledActions: ['register'], initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
   page.get('enrollmentCode').value = 'A'.repeat(32);
   await page.get('enrollment').handlers.submit({ preventDefault() {} });
   assert.equal(page.get('enrollmentStatus').textContent, '機能が停止中です。');
+  assert.equal(page.requests.filter((item) => item.action === 'register').length, 1);
+  assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 0);
 });
-test('initial LIFF work date uses the verification baseline without removing date selection', () => {
+
+test('read-only shift capability disables editor inputs and prevents shift writes', async () => {
+  const page = makePage({ shiftWritesEnabled: false, attendanceWritesEnabled: true, initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 2, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null } });
+  await page.context.load(false);
+  assert.equal(page.get('startTime').disabled, true);
+  assert.equal(page.get('endTime').disabled, true);
+  assert.equal(page.get('saveButton').disabled, true);
+  assert.equal(page.get('deleteButton').disabled, true);
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
+  await page.get('deleteButton').handlers.click();
+  assert.equal(page.requests.some((item) => item.action === 'shiftMutation'), false);
+});
+
+test('initial work date and current employee controls stay in the existing attendance screen', () => {
   const dateInput = html.match(/<input id="workDate"[^>]*>/)?.[0] || '';
   assert.match(dateInput, /type="date"/);
   assert.match(dateInput, /value="2026-10-05"/);
-});
-
-test('shift editor is embedded in the existing attendance card, not a separate screen', async () => {
-  const page = makePage({
-    initialState: { employeeId: 'TEST-M', attendanceEmployeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null },
-    attendanceRecords: [{ employeeId: 'EMP-01', displayName: '本人', workDate: '2026-10-05', plannedStart: '09:00', plannedEnd: '17:00', plannedEndNextDay: false, actualStart: '09:00', actualEnd: '17:00', revision: 0, saved: false }],
-  });
-  await page.context.load(false);
-  const attendanceCard = page.get('list').children.find((card) => card.children.includes(page.get('shiftCard')));
-  assert.ok(attendanceCard, 'the shift editor is a child of the attendance record card');
-});
-
-test('shift registration remains available inside the attendance list when no attendance row exists', async () => {
-  const page = makePage({ initialState: { employeeId: 'EMP-01', revision: 0, schedule: null }, attendanceRecords: [] });
-  await page.context.load(false);
-  assert.equal(page.get('list').children.length, 1);
-  assert.equal(page.get('list').children[0].children.includes(page.get('shiftCard')), true);
-  assert.equal(page.get('shiftSaveButton').disabled, false);
-});
-
-test('disabled shift controls do not disable an independently enabled attendance save', async () => {
-  const page = makePage({
-    initialState: { employeeId: 'EMP-01', revision: 0, schedule: null },
-    writesEnabled: false,
-    shiftWritesEnabled: false,
-    attendanceWritesEnabled: true,
-    attendanceRecords: [{ employeeId: 'EMP-01', displayName: '本人', workDate: '2026-10-05', plannedStart: '09:00', plannedEnd: '17:00', plannedEndNextDay: false, actualStart: '09:00', actualEnd: '17:00', revision: 0, saved: false }],
-  });
-  await page.context.load(false);
-  const form = page.get('list').children[0].children.find((child) => typeof child.handlers.submit === 'function');
-  assert.equal(page.get('shiftSaveButton').disabled, true);
-  assert.equal(page.get('shiftDeleteButton').disabled, true);
-  assert.equal(form.children[2].disabled, false);
-  await form.handlers.submit({ preventDefault() {} });
-  assert.equal(page.requests.filter((item) => item.action === 'saveActual').length, 1);
-  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 0);
+  for (const id of ['entryCard', 'entryForm', 'startTime', 'endTime', 'saveButton', 'deleteButton']) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(html, /class="entry-actions"[^>]*>[\s\S]*id="saveButton"[\s\S]*id="deleteButton"/);
+  assert.match(html, /\.entry-actions\{[^}]*display:flex[^}]*gap:20px/);
+  assert.match(html, /<button id="saveButton" type="submit">保存<\/button>/);
+  assert.match(html, /<label>開始 /);
+  assert.match(html, /<label>終了 /);
+  assert.doesNotMatch(html, /id="shiftForm"/);
 });

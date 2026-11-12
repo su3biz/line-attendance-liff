@@ -7,33 +7,35 @@ const path = require('node:path');
 
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const scriptMatch = html.match(/<script>\s*([\s\S]*?)<\/script>/);
-assert.ok(scriptMatch, 'existing root page has an inline LIFF script');
+assert.ok(scriptMatch, 'root page has an inline LIFF script');
 const script = scriptMatch[1];
-const DEV_GAS_V24_URL = 'https://script.google.com/macros/s/AKfycbzYQkx1NBTCGpqR6XGVXCgNP0s3PfE7_gZt2-FhhTkmFIKGhGoyqq6DA46rdNEXqqII/exec';
+const DEV_GAS_URL = 'https://script.google.com/macros/s/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS/exec';
 
-test('existing root keeps the DEV LIFF identity and is pinned to the existing DEV GAS deployment v24', () => {
+test('DEV root uses the current LIFF identity and one current DEV GAS endpoint', () => {
   assert.match(script, /const LIFF_ID='2012227652-CgVMkyBb';/);
-  assert.match(script, new RegExp(`const GAS_URL='${DEV_GAS_V24_URL.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}';`));
+  assert.match(script, new RegExp(`const GAS_URL='${DEV_GAS_URL.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}';`));
   const endpoints = [...html.matchAll(/https:\/\/script\.google\.com\/macros\/s\/[^/'"]+\/exec/g)].map((match) => match[0]);
-  assert.deepEqual([...new Set(endpoints)], [DEV_GAS_V24_URL]);
+  assert.deepEqual([...new Set(endpoints)], [DEV_GAS_URL], 'no stale DEV GAS endpoints remain in the root');
   assert.equal((script.match(/\bfetch\s*\(/g) || []).length, 1);
   assert.match(script, /fetch\(GAS_URL,/);
 });
 
-test('existing root contains the Phase 2 shift create, update, and delete controls', () => {
-  for (const id of ['shiftCard', 'shiftForm', 'shiftStart', 'shiftEnd', 'shiftSaveButton', 'shiftDeleteButton']) {
+test('root uses Phase 2 shift mutation and the existing attendance response model', () => {
+  for (const id of ['entryCard', 'entryForm', 'startTime', 'endTime', 'saveButton', 'deleteButton']) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
   assert.match(script, /action:'shiftMutation'/);
-  assert.match(script, /\['create','update','delete'\]/);
+  assert.match(script, /action:'attendanceList'/);
+  assert.match(script, /entryState=\{/);
+  assert.doesNotMatch(script, /action:'saveActual'/, 'the current UI saves through shiftMutation');
+  assert.doesNotMatch(html, /id=["']shiftForm["']/);
 });
 
-test('existing LINE authentication and attendance actions remain in the root page', () => {
-  assert.match(script, /liff\.init\(\{liffId:LIFF_ID\}\)/);
-  assert.match(script, /liff\.login\(\)/);
-  assert.match(script, /liff\.getIDToken\(\)/);
-  for (const action of ["action:'attendanceList'", "action:'saveActual'", "action:'register'"]) {
-    assert.ok(script.includes(action), `existing action ${action} remains available`);
-  }
-  assert.match(html, /id="workDate"/);
+test('authentication recovery and error display use the current screen without exposing a Sub ID', () => {
+  assert.match(script, /ensureFreshIdToken\(\)/);
+  assert.match(script, /AUTH_RECOVERY_SESSION_KEY/);
+  assert.match(script, /liff\.login\(\{redirectUri:window\.location\.href\}\)/);
+  assert.match(script, /function showConnectionError\(/);
+  assert.match(script, /diagnosticEnabled/);
+  assert.doesNotMatch(html, /アクセス中のLINE Sub ID|id=["']lineSubId["']/);
 });
