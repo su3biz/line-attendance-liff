@@ -67,6 +67,35 @@ test('DEV trace preserves ordered stages with elapsed time and sanitized details
   assert.equal(standard.get('traceOutput').textContent, '');
 });
 
+test('DEV error screen merges safe server stages and elapsed time without server detail text', async () => {
+  const page = makePage('?authDiagnostics=DEV');
+  page.context.liff = {
+    getIDToken: () => 'synthetic-id-token',
+    getDecodedIDToken: () => ({ exp: Math.floor(Date.now() / 1000) + 300 }),
+  };
+  page.context.fetch = async () => ({
+    ok: true, status: 200, redirected: false,
+    json: async () => ({
+      ok: false, code: 'UNAVAILABLE',
+      trace: [
+        { stage: 'attendance_open_sheets', state: '開始', ms: 2, detail: 'private employee identifier' },
+        { stage: 'attendance_open_sheets', state: '失敗', ms: 4, detail: 'secret exception text' },
+      ],
+    }),
+  });
+
+  await assert.rejects(page.context.api({ action: 'attendanceList', workDate: '2026-11-12' }), (error) => {
+    page.context.showConnectionError('', error.code);
+    return error.code === 'UNAVAILABLE';
+  });
+
+  const output = page.get('traceOutput').textContent;
+  assert.match(output, /gas_attendance_open_sheets  開始  server 2ms/);
+  assert.match(output, /gas_attendance_open_sheets  失敗  server 4ms/);
+  assert.equal(output.includes('private employee identifier'), false);
+  assert.equal(output.includes('secret exception text'), false);
+});
+
 test('authentication failure uses the existing error panel, reconnect control, and value-free diagnostics', async () => {
   const page = makePage('?authDiagnostics=DEV');
   page.get('workDate').value = '2026-11-11';
