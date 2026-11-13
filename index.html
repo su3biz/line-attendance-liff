@@ -102,7 +102,7 @@ const startTimeInput=document.getElementById('startTime');
 const endTimeInput=document.getElementById('endTime');
 const saveButton=document.getElementById('saveButton');
 const deleteButton=document.getElementById('deleteButton');
-let entryState=null,dateClass='invalid',shiftWritesEnabled=false,attendanceWritesEnabled=false;
+let entryState=null,dateClass='invalid',shiftWritesEnabled=false,attendanceWritesEnabled=false,selectedManagerEmployeeId='';
 const BASE_DATE='2026-10-01';
 const LOAD_ERROR='通信エラーが発生しました。サーバーに接続できませんでした。通信状態を確認し、「再接続」を押してください。';
 const SAVE_UNKNOWN_ERROR='保存結果を確認できませんでした。重複書き込みを避けるため再保存せず、再接続して最新状態を確認してください。';
@@ -193,12 +193,41 @@ function applyWriteMode(){
  startTimeInput.disabled=!shiftWritesEnabled||busy;endTimeInput.disabled=!shiftWritesEnabled||busy;
  saveButton.disabled=busy||!canSave||!timesValid;
  deleteButton.disabled=busy||!entryState||(!entryState.schedule&&!entryState.attendance)||!shiftWritesEnabled|| (!!entryState.attendance&&!attendanceWritesEnabled);
+ for(const card of list.querySelectorAll('[data-manager-card]')){
+  const start=card.querySelector('[data-manager-start]'),end=card.querySelector('[data-manager-end]'),save=card.querySelector('[data-manager-save]'),remove=card.querySelector('[data-manager-delete]');
+  if(!start||!end||!save||!remove)continue;
+  const valid=validTime(start.value)&&validTime(end.value)&&start.value!==end.value;
+  start.disabled=!shiftWritesEnabled||busy;end.disabled=!shiftWritesEnabled||busy;
+  save.disabled=busy||!shiftWritesEnabled||(dateClass!=='future'&&!attendanceWritesEnabled)||!valid;
+  remove.disabled=busy||!shiftWritesEnabled||(card.dataset.hasValues!=='true')||(card.dataset.hasAttendance==='true'&&!attendanceWritesEnabled);
+ }
 }
 function normalizeSchedule(value){if(value===null||typeof value==='undefined')return null;if(!value)throw Error('schedule format');const startTime=value.startTime===''||value.startTime===null||typeof value.startTime==='undefined'?'':scheduleTime(value.startTime),endTime=value.endTime===''||value.endTime===null||typeof value.endTime==='undefined'?'':scheduleTime(value.endTime);if(startTime&&endTime&&startTime===endTime)throw Error('schedule format');if(!startTime&&!endTime)return null;return {startTime,endTime};}
 function normalizeAttendance(value){if(value===null||typeof value==='undefined')return null;if(!value||!validTime(value.startTime)||!validTime(value.endTime)||value.startTime===value.endTime)throw Error('attendance format');return {startTime:value.startTime,endTime:value.endTime};}
 function renderManagerRecords(records){
  list.replaceChildren();if(!records.length){list.textContent='この日の勤務予定はありません。';return;}
- for(const row of records){const card=document.createElement('article'),title=document.createElement('h2'),date=document.createElement('p'),planned=document.createElement('p'),actual=document.createElement('p');title.textContent=row.displayName;date.textContent='勤務日: '+row.workDate;planned.className='times';planned.textContent='予定: '+(row.plannedStart&&row.plannedEnd?rangeText(scheduleTime(row.plannedStart),scheduleTime(row.plannedEnd),row.plannedEndNextDay):'未登録');actual.textContent='開始・終了: '+(row.saved?rangeText(row.actualStart,row.actualEnd,row.actualEndNextDay):'未登録');card.append(title,date,planned,actual);list.appendChild(card);}
+ for(const row of records){
+  const schedule=normalizeSchedule(row.schedule),attendance=normalizeAttendance(row.attendance),selected=attendance||schedule;
+  const card=document.createElement('article'),title=document.createElement('h2'),date=document.createElement('p'),planned=document.createElement('p'),actual=document.createElement('p'),form=document.createElement('div'),saveAction=document.createElement('div'),deleteAction=document.createElement('div');
+  card.dataset.managerCard='true';card.dataset.hasValues=String(!!(schedule||attendance));card.dataset.hasAttendance=String(!!attendance);
+  title.textContent=row.displayName;date.textContent='勤務日: '+row.workDate;planned.className='times';planned.textContent='予定: '+(schedule&&schedule.startTime&&schedule.endTime?rangeText(scheduleTime(schedule.startTime),scheduleTime(schedule.endTime),row.plannedEndNextDay):'未登録');actual.textContent='開始・終了: '+(attendance?rangeText(attendance.startTime,attendance.endTime,row.actualEndNextDay):'未登録');
+  form.className='entry-actions';saveAction.className='save-action';deleteAction.className='delete-action';
+  const startLabel=document.createElement('label'),start=document.createElement('input'),endLabel=document.createElement('label'),end=document.createElement('input'),save=document.createElement('button'),remove=document.createElement('button');
+  start.type='time';start.value=selected?selected.startTime:'';start.dataset.managerStart='true';startLabel.append('開始',start);
+  end.type='time';end.value=selected?selected.endTime:'';end.dataset.managerEnd='true';endLabel.append('終了',end);
+  save.type='button';save.textContent='保存';save.dataset.managerSave='true';remove.type='button';remove.textContent='削除';remove.dataset.managerDelete='true';saveAction.appendChild(save);deleteAction.appendChild(remove);
+  form.append(startLabel,endLabel,saveAction,deleteAction);card.append(title,date,planned,actual,form);list.appendChild(card);
+  if(selectedManagerEmployeeId===row.targetActorId)entryState=managerEntryState(row);
+  const prepare=()=>{entryState=managerEntryState(row);selectedManagerEmployeeId=row.targetActorId;startTimeInput.value=start.value;endTimeInput.value=end.value;};
+  start.addEventListener('input',applyWriteMode);end.addEventListener('input',applyWriteMode);
+  save.addEventListener('click',async()=>{prepare();await mutateEntry('save');});
+  remove.addEventListener('click',async()=>{prepare();await mutateEntry('delete');});
+ }
+ applyWriteMode();
+}
+function managerEntryState(row){
+ if(typeof row.targetActorId!=='string'||!row.targetActorId||typeof row.displayName!=='string'||!Number.isSafeInteger(row.revision)||row.revision<0||typeof row.stateToken!=='string'||!/^[a-f0-9]{64}$/.test(row.stateToken))throw Error('manager entry identity');
+ return {employeeId:row.targetActorId,attendanceEmployeeId:row.attendanceEmployeeId||'',displayName:row.displayName,revision:row.revision,stateToken:row.stateToken,schedule:normalizeSchedule(row.schedule),attendance:normalizeAttendance(row.attendance),attendanceRevision:Number.isSafeInteger(row.attendanceRevision)?row.attendanceRevision:0};
 }
 function render(data){
  list.replaceChildren();entryState=null;dateClass=data.dateClass;
@@ -212,8 +241,12 @@ function render(data){
  entryCard.hidden=true;renderManagerRecords(Array.isArray(data.records)?data.records:[]);
 }
 function entryOutcomeMatches(data,type,previous,expectedWorkDate,startTime,endTime){
- if(!data||data.actorRole!=='employee'||!data.selfShift||data.workDate!==expectedWorkDate)return false;
- const value=data.selfShift,schedule=value.schedule||null,attendance=value.attendance||null;
+ if(!data||data.workDate!==expectedWorkDate)return false;
+ let value;
+ if(data.actorRole==='manager')value=Array.isArray(data.records)?data.records.find(row=>row&&row.targetActorId===previous.employeeId):null;
+ else if(data.actorRole==='employee')value=data.selfShift;
+ if(!value)return false;
+ const schedule=value.schedule||null,attendance=value.attendance||null;
  if(type==='delete')return schedule===null&&attendance===null&&value.revision===previous.revision+1;
  const expectedRevision=!previous.schedule&&previous.revision===0?0:previous.revision+1;
  if(!schedule||schedule.startTime!==startTime||schedule.endTime!==endTime||value.revision!==expectedRevision)return false;
