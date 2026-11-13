@@ -102,7 +102,7 @@ const startTimeInput=document.getElementById('startTime');
 const endTimeInput=document.getElementById('endTime');
 const saveButton=document.getElementById('saveButton');
 const deleteButton=document.getElementById('deleteButton');
-let entryState=null,selectedManagerEmployeeId='',dateClass='invalid',shiftWritesEnabled=false,attendanceWritesEnabled=false;
+let entryState=null,dateClass='invalid',shiftWritesEnabled=false,attendanceWritesEnabled=false;
 const BASE_DATE='2026-10-01';
 const LOAD_ERROR='通信エラーが発生しました。サーバーに接続できませんでした。通信状態を確認し、「再接続」を押してください。';
 const SAVE_UNKNOWN_ERROR='保存結果を確認できませんでした。重複書き込みを避けるため再保存せず、再接続して最新状態を確認してください。';
@@ -197,16 +197,8 @@ function applyWriteMode(){
 function normalizeSchedule(value){if(value===null||typeof value==='undefined')return null;if(!value)throw Error('schedule format');const startTime=value.startTime===''||value.startTime===null||typeof value.startTime==='undefined'?'':scheduleTime(value.startTime),endTime=value.endTime===''||value.endTime===null||typeof value.endTime==='undefined'?'':scheduleTime(value.endTime);if(startTime&&endTime&&startTime===endTime)throw Error('schedule format');if(!startTime&&!endTime)return null;return {startTime,endTime};}
 function normalizeAttendance(value){if(value===null||typeof value==='undefined')return null;if(!value||!validTime(value.startTime)||!validTime(value.endTime)||value.startTime===value.endTime)throw Error('attendance format');return {startTime:value.startTime,endTime:value.endTime};}
 function renderManagerRecords(records){
- list.replaceChildren();if(!records.length){list.textContent='対象従業員がありません。';return;}
- for(const row of records){const card=document.createElement('article'),title=document.createElement('h2'),date=document.createElement('p'),planned=document.createElement('p'),actual=document.createElement('p');title.textContent=row.displayName;date.textContent='勤務日: '+row.workDate;planned.className='times';planned.textContent='予定: '+(row.plannedStart&&row.plannedEnd?rangeText(row.plannedStart,row.plannedEnd,row.plannedEndNextDay):'未登録');actual.textContent='実績: '+(row.saved&&row.actualStart&&row.actualEnd?rangeText(row.actualStart,row.actualEnd,row.actualEndNextDay):'未登録');card.append(title,date,planned,actual);if(shiftWritesEnabled&&typeof row.targetActorId==='string'){const edit=document.createElement('button');edit.type='button';edit.textContent='編集';edit.addEventListener('click',()=>selectManagerRecord(row));card.append(edit);}list.appendChild(card);}
-}
-function selectManagerRecord(value){
- if(typeof value.targetActorId!=='string'||!value.targetActorId||!Number.isSafeInteger(value.revision)||value.revision<0||typeof value.stateToken!=='string'||!/^[a-f0-9]{64}$/.test(value.stateToken))throw Error('manager entry identity');
- const schedule=normalizeSchedule(value.schedule),attendance=normalizeAttendance(value.attendance);
- selectedManagerEmployeeId=value.targetActorId;
- entryState={employeeId:value.targetActorId,attendanceEmployeeId:value.attendanceEmployeeId||'',displayName:value.displayName,revision:value.revision,stateToken:value.stateToken,schedule,attendance,attendanceRevision:Number.isSafeInteger(value.attendanceRevision)?value.attendanceRevision:0};
- employeeName.textContent=entryState.displayName;plannedTime.textContent=schedule?'予定: '+(schedule.startTime||'未入力')+'–'+(schedule.endTime||'未入力')+(schedule.startTime&&schedule.endTime&&schedule.endTime<schedule.startTime?'（翌日）':''):'シフト予定は未登録です。';
- startTimeInput.value=attendance?attendance.startTime:(schedule?schedule.startTime:'');endTimeInput.value=attendance?attendance.endTime:(schedule?schedule.endTime:'');entryCard.hidden=false;applyWriteMode();entryCard.scrollIntoView({block:'nearest'});
+ list.replaceChildren();if(!records.length){list.textContent='この日の勤務予定はありません。';return;}
+ for(const row of records){const card=document.createElement('article'),title=document.createElement('h2'),date=document.createElement('p'),planned=document.createElement('p'),actual=document.createElement('p');title.textContent=row.displayName;date.textContent='勤務日: '+row.workDate;planned.className='times';planned.textContent='予定: '+rangeText(scheduleTime(row.plannedStart),scheduleTime(row.plannedEnd),row.plannedEndNextDay);actual.textContent='開始・終了: '+(row.saved?rangeText(row.actualStart,row.actualEnd,row.actualEndNextDay):'未登録');card.append(title,date,planned,actual);list.appendChild(card);}
 }
 function render(data){
  list.replaceChildren();entryState=null;dateClass=data.dateClass;
@@ -217,13 +209,11 @@ function render(data){
   employeeName.textContent=entryState.displayName;plannedTime.textContent=schedule?'予定: '+(schedule.startTime||'未入力')+'–'+(schedule.endTime||'未入力')+(schedule.startTime&&schedule.endTime&&schedule.endTime<schedule.startTime?'（翌日）':''):'シフト予定は未登録です。';
   startTimeInput.value=attendance?attendance.startTime:(schedule?schedule.startTime:'');endTimeInput.value=attendance?attendance.endTime:(schedule?schedule.endTime:'');entryCard.hidden=false;applyWriteMode();return;
  }
- entryCard.hidden=true;const records=Array.isArray(data.records)?data.records:[];renderManagerRecords(records);
- if(data.actorRole==='manager'&&selectedManagerEmployeeId){const selected=records.find(row=>row.targetActorId===selectedManagerEmployeeId);if(selected)selectManagerRecord(selected);else selectedManagerEmployeeId='';}
+ entryCard.hidden=true;renderManagerRecords(Array.isArray(data.records)?data.records:[]);
 }
 function entryOutcomeMatches(data,type,previous,expectedWorkDate,startTime,endTime){
- if(!data||data.workDate!==expectedWorkDate)return false;
- let value;if(data.actorRole==='employee')value=data.selfShift;else if(data.actorRole==='manager')value=(data.records||[]).find(row=>row.targetActorId===previous.employeeId);if(!value)return false;
- const schedule=value.schedule||null,attendance=value.attendance||null;
+ if(!data||data.actorRole!=='employee'||!data.selfShift||data.workDate!==expectedWorkDate)return false;
+ const value=data.selfShift,schedule=value.schedule||null,attendance=value.attendance||null;
  if(type==='delete')return schedule===null&&attendance===null&&value.revision===previous.revision+1;
  const expectedRevision=!previous.schedule&&previous.revision===0?0:previous.revision+1;
  if(!schedule||schedule.startTime!==startTime||schedule.endTime!==endTime||value.revision!==expectedRevision)return false;
