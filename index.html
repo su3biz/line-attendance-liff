@@ -35,7 +35,7 @@
 <section id="connectionError" role="alert" hidden><h1 id="connectionErrorHeading">通信エラーが発生しました。</h1><p id="connectionErrorMessage"></p><p id="authErrorCode" hidden>エラーコード：AUTHENTICATION_FAILED</p><p id="authDiagnosticCode" hidden></p><p id="authHttpStatus" hidden></p><section id="authDetails" hidden><h2>一時認証診断</h2><p>decodedの内容は未検証です。表示は真偽判定のみです。</p><dl><dt>IDトークン取得</dt><dd id="authTokenPresent">未確認</dd><dt>起動時トークン判定</dt><dd id="authTokenReason">未確認</dd><dt>期限切れ経過</dt><dd id="authExpiredSeconds">未確認</dd><dt>aud一致</dt><dd id="authAudMatches">未確認</dd><dt>iss一致</dt><dd id="authIssMatches">未確認</dd><dt>exp期限内</dt><dd id="authExpValid">未確認</dd><dt>sub存在</dt><dd id="authSubPresent">未確認</dd><dt>iat妥当</dt><dd id="authIatValid">未確認</dd><dt>Verify URL</dt><dd id="verifyUrlOk">未確認</dd><dt>Verify method</dt><dd id="verifyMethodOk">未確認</dd><dt>contentType</dt><dd id="verifyContentTypeOk">未確認</dd><dt>id_token存在・型</dt><dd id="verifyIdTokenOk">未確認</dd><dt>client_id存在・型</dt><dd id="verifyClientIdOk">未確認</dd><dt>client_id一致</dt><dd id="verifyClientIdMatches">未確認</dd><dt>設定チャネル一致</dt><dd id="verifyConfiguredChannelMatches">未確認</dd></dl></section><button id="retry" type="button">再接続</button></section>
 <h1>勤務予定・実績</h1>
 <p>勤務日と勤務時間を確認してください。保存すると、対象日に応じてシフト表と勤怠表へ反映されます。</p>
-<label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" value="2026-10-05" required></label>
+<label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" required></label>
 <section id="entryCard" class="entry-card" hidden>
 <h2 id="employeeName">勤務</h2>
 <p id="plannedTime" class="times">予定: 未登録</p>
@@ -108,6 +108,8 @@ const loadingMessage=document.getElementById('loadingMessage');
 const enrollmentPanel=document.getElementById('enrollmentPanel');
 const attendancePanel=document.getElementById('attendancePanel');
 const workDateInput=document.getElementById('workDate');
+const initialLocalDate=new Date();
+workDateInput.value=[initialLocalDate.getFullYear(),String(initialLocalDate.getMonth()+1).padStart(2,'0'),String(initialLocalDate.getDate()).padStart(2,'0')].join('-');
 const entryCard=document.getElementById('entryCard');
 const employeeName=document.getElementById('employeeName');
 const plannedTime=document.getElementById('plannedTime');
