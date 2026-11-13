@@ -31,7 +31,7 @@ function makePage({ initialState, confirm = true, mutationFailure = null, respon
     if (!elements.has(name)) elements.set(name, element());
     return elements.get(name);
   };
-  const nextState = { ...initialState };
+  const nextState = { stateToken: 'a'.repeat(64), ...initialState };
   const location = { href: 'https://example.test/liff', search: '', reload() {} };
   const context = vm.createContext({
     document: {
@@ -63,8 +63,12 @@ function makePage({ initialState, confirm = true, mutationFailure = null, respon
       requests.push(fields);
       if (fields.action === 'shiftMutation') {
         if (disabledActions.includes('shiftMutation')) return { ok: true, json: async () => ({ ok: false, code: 'DISABLED' }) };
+        if (mutationFailure === 'conflict') return { ok: true, json: async () => ({ ok: false, code: 'CONFLICT' }) };
         if (mutationFailure === 'before') throw new Error('simulated request failure');
-        nextState.revision = Number(fields.expectedRevision) + 1;
+        nextState.revision = fields.type === 'create' && !nextState.schedule && Number(fields.expectedRevision) === 0
+          ? 0
+          : Number(fields.expectedRevision) + 1;
+        nextState.stateToken = 'b'.repeat(64);
         nextState.schedule = fields.type === 'delete' ? null : { startTime: fields.startTime, endTime: fields.endTime };
         if (fields.type === 'delete') nextState.attendance = null;
         else if (dateClass !== 'future') nextState.attendance = { startTime: fields.startTime, endTime: fields.endTime };
@@ -104,11 +108,24 @@ test('employee can create a shift through the current entry form with the authen
   const request = page.requests.find((item) => item.action === 'shiftMutation');
   assert.deepEqual(request, {
     id_token: 'test-line-id-token', action: 'shiftMutation', type: 'create', employeeId: 'EMP-01', workDate: '2026-10-05',
-    expectedRevision: '2', requestId: 'request-0001', startTime: '09:00', endTime: '17:00',
+    expectedRevision: '2', expectedStateToken: 'a'.repeat(64), requestId: 'request-0001', startTime: '09:00', endTime: '17:00',
   });
   assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 2);
   assert.equal(vm.runInContext('entryState.revision', page.context), 3);
   assert.equal(page.get('saveButton').disabled, false);
+});
+
+test('employee can save an initially empty day and the revision-zero create is confirmed by readback', async () => {
+  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await page.context.load(false);
+  page.get('startTime').value = '09:00';
+  page.get('endTime').value = '17:00';
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
+  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
+  assert.equal(vm.runInContext('entryState.revision', page.context), 0);
+  assert.equal(vm.runInContext('entryState.schedule.startTime', page.context), '09:00');
+  assert.match(page.get('status').textContent, /保存結果を.*再取得で確認しました/);
+  assert.equal(page.get('connectionError').hidden, true);
 });
 
 test('employee update uses the current schedule revision', async () => {
@@ -122,6 +139,39 @@ test('employee update uses the current schedule revision', async () => {
   assert.equal(request.expectedRevision, '4');
   assert.equal(request.startTime, '10:00');
   assert.equal(request.endTime, '18:00');
+});
+
+
+test('a state-token conflict reloads current state and retries one save with a new request ID', async () => {
+  const page = makePage({
+    mutationFailure: 'conflict',
+    initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 4, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null },
+  });
+  await page.context.load(false);
+  page.get('startTime').value = '10:00'; page.get('endTime').value = '18:00';
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
+  const mutations = page.requests.filter((item) => item.action === 'shiftMutation');
+  assert.equal(mutations.length, 2);
+  assert.notEqual(mutations[0].requestId, mutations[1].requestId);
+  assert.equal(mutations[1].expectedStateToken, 'a'.repeat(64));
+  assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 3);
+  assert.equal(page.get('startTime').value, '10:00');
+  assert.equal(page.get('endTime').value, '18:00');
+  assert.match(page.get('status').textContent, /別の操作で更新/);
+});
+
+test('startup clears the busy gate and applies current writer permissions to initial buttons', async () => {
+  const empty = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await empty.context.start();
+  assert.equal(empty.get('saveButton').disabled, true, 'empty invalid times cannot be saved');
+  assert.equal(empty.get('deleteButton').disabled, true, 'empty state has nothing to delete');
+
+  const populated = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 4, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: { startTime: '10:00', endTime: '18:00' } } });
+  await populated.context.start();
+  assert.equal(populated.get('startTime').value, '10:00');
+  assert.equal(populated.get('endTime').value, '18:00');
+  assert.equal(populated.get('saveButton').disabled, false);
+  assert.equal(populated.get('deleteButton').disabled, false);
 });
 
 test('shift deletion asks for confirmation and sends no mutation when cancelled', async () => {
@@ -185,6 +235,22 @@ test('all four cases display the specified source times and enable delete only w
     assert.equal(page.get('startTime').value, state.displayed?.startTime || '', `case ${index + 1} start`);
     assert.equal(page.get('endTime').value, state.displayed?.endTime || '', `case ${index + 1} end`);
     assert.equal(page.get('deleteButton').disabled, state.deleteDisabled, `case ${index + 1} delete availability`);
+  }
+});
+
+test('either single schedule endpoint remains deletable and delete clears the whole schedule', async () => {
+  for (const schedule of [{ startTime: '09:00', endTime: '' }, { startTime: '', endTime: '17:00' }]) {
+    const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 2, schedule, attendance: null } });
+    await page.context.load(false);
+    assert.equal(page.get('deleteButton').disabled, false);
+    assert.equal(page.get('startTime').value, schedule.startTime);
+    assert.equal(page.get('endTime').value, schedule.endTime);
+    await page.get('deleteButton').handlers.click();
+    assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
+    assert.equal(page.requests.find((item) => item.action === 'shiftMutation').type, 'delete');
+    assert.equal(vm.runInContext('entryState.schedule', page.context), null);
+    assert.equal(vm.runInContext('entryState.attendance', page.context), null);
+    assert.match(page.get('status').textContent, /削除結果を再取得で確認しました/);
   }
 });
 
