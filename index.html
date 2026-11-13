@@ -8,7 +8,7 @@
 <title>LINE勤怠</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
-.entry-form label,.manager-entry-form label{display:flex;align-items:center;gap:4px}.manager-create-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.manager-create-controls input[type=month]{min-height:48px;min-width:180px}.manager-create-controls button{min-width:150px;min-height:48px}.manager-create-error{color:#b52f2f;white-space:pre-wrap}
+.entry-form label,.manager-entry-form label{display:flex;align-items:center;gap:4px}.manager-create-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.manager-create-controls input[type=month]{min-height:48px;min-width:180px}.manager-create-controls button{min-width:150px;min-height:48px}.manager-create-error,.month-sheets-message{color:#b52f2f;white-space:pre-wrap}
 :root{font-family:system-ui,sans-serif;color:#202b26;background:#f4f7f5}body{margin:0}main{max-width:680px;margin:auto;padding:20px}article,.entry-card{background:#fff;border-radius:12px;padding:16px;margin:12px 0}label{display:block;margin:12px 0}input,button{font:inherit;padding:10px}button{background:#06a94d;color:#fff;border:0;border-radius:8px;min-height:44px}button:disabled{opacity:.5}[hidden]{display:none!important}#status,#enrollmentStatus,#connectionErrorMessage{white-space:pre-wrap}#diagnostics{background:#fff;border:1px solid #9ab5a4;border-radius:10px;padding:12px;margin-bottom:16px;font-size:.9rem}#diagnostics h2{font-size:1rem;margin:0 0 8px}#diagnostics dl{display:grid;grid-template-columns:minmax(130px,1fr) 2fr;gap:4px 10px;margin:0}#diagnostics dd{margin:0;overflow-wrap:anywhere}#traceOutput{display:block;max-height:18rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,monospace;background:#f5f7f6;padding:8px}.muted{color:#58645e;font-size:.95rem}.times{font-weight:600}.nextday{font-size:.9em;color:#58645e}.entry-actions{display:flex;align-items:center;gap:20px;margin-top:24px}.save-action,.delete-action{margin:0;padding:0;border:0}.delete-action button{background:#fff;color:#b52f2f;border:1.5px solid #cf4141;min-width:120px}.save-action button{min-width:120px}
 #loading{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:#fff;padding:20px}
 #lineSubId{margin:12px 0 0;overflow-wrap:anywhere;font-size:.9rem;color:#58645e}
@@ -36,6 +36,7 @@
 <h1>勤務予定・実績</h1>
 <p>勤務日と勤務時間を確認してください。保存すると、対象日に応じてシフト表と勤怠表へ反映されます。</p>
 <label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" required></label>
+<p id="monthSheetsMessage" class="month-sheets-message" role="status" aria-live="polite" hidden></p>
 <section id="entryCard" class="entry-card" hidden>
 <h2 id="employeeName">勤務</h2>
 <p id="plannedTime" class="times">予定: 未登録</p>
@@ -92,6 +93,7 @@ const managerCreateSection=document.getElementById('managerCreateSection');
 const managerCreateMonth=document.getElementById('managerCreateMonth');
 const managerCreateButton=document.getElementById('managerCreateButton');
 const managerCreateError=document.getElementById('managerCreateError');
+const monthSheetsMessage=document.getElementById('monthSheetsMessage');
 const retry=document.getElementById('retry');
 const connectionError=document.getElementById('connectionError');
 const connectionErrorMessage=document.getElementById('connectionErrorMessage');
@@ -247,6 +249,8 @@ function managerEntryState(row){
 }
 function render(data){
  list.replaceChildren();entryState=null;dateClass=data.dateClass;managerCreateSection.hidden=data.actorRole!=='manager';
+ monthSheetsMessage.hidden=true;monthSheetsMessage.textContent='';entryCard.hidden=true;
+ if(data.monthSheetsMissing){monthSheetsMessage.textContent='対象月のシフト表または勤怠表がありません。';monthSheetsMessage.hidden=false;applyWriteMode();return;}
  if(data.actorRole==='employee'&&data.selfShift){
   const value=data.selfShift;if(typeof value.employeeId!=='string'||!value.employeeId||typeof value.displayName!=='string'||!value.displayName.trim()||!Number.isSafeInteger(value.revision)||value.revision<0||typeof value.stateToken!=='string'||!/^[a-f0-9]{64}$/.test(value.stateToken))throw Error('self entry identity');
   const schedule=normalizeSchedule(value.schedule),attendance=normalizeAttendance(value.attendance);if(!['today','past','future'].includes(dateClass))throw Error('date class');
@@ -316,6 +320,7 @@ async function load(show=true,diagnosticPhase='attendance'){
  let processingStage='API応答待ち';
  diagnostic('processing','API応答待ち');
  shiftWritesEnabled=false;attendanceWritesEnabled=false;applyWriteMode();
+ monthSheetsMessage.hidden=true;monthSheetsMessage.textContent='';
  if(!selectedDate||selectedDate<BASE_DATE){status.textContent='勤怠日は2026-10-01以降を選択してください。';retry.hidden=true;return null;}
  retry.disabled=false;clearConnectionError();status.textContent='';setLoading(true,'勤怠情報を読み込んでいます…');
  try{
@@ -331,7 +336,7 @@ async function load(show=true,diagnosticPhase='attendance'){
   processingStage='画面パネルの切替';diagnostic('processing',processingStage);
   enrollmentPanel.hidden=true;attendancePanel.hidden=false;processingStage='描画呼び出し';diagnostic('processing',processingStage);diagnostic('render','実行中');try{render(data);diagnostic('render','成功');}catch(renderError){diagnostic('render','失敗');const safeErrorType=['Error','TypeError','RangeError','ReferenceError','SyntaxError','URIError','EvalError'].includes(renderError&&renderError.name)?renderError.name:'Other';trace('render_error','情報','type '+safeErrorType);throw renderError;}processingStage='描画後の操作状態更新';diagnostic('processing',processingStage);applyWriteMode();
   processingStage='画面メッセージ更新';diagnostic('processing',processingStage);
-  if(show&&!status.textContent)status.textContent=!shiftWritesEnabled?'勤務情報の更新は停止中です。':(data.actorRole==='manager'?(data.records.length?data.records.length+'名分の勤務情報を表示しています。':''):'');
+  if(show&&!status.textContent)status.textContent=data.monthSheetsMissing?'':(!shiftWritesEnabled?'勤務情報の更新は停止中です。':(data.actorRole==='manager'?(data.records.length?data.records.length+'名分の勤務情報を表示しています。':''):''));
   diagnostic('processing','完了');trace('initial_data','成功','処理完了');trace('render_complete','成功','画面更新完了');
   return data;
  }catch(e){
@@ -366,7 +371,11 @@ managerCreateButton.addEventListener('click',async()=>{
  busy=true;managerCreateButton.disabled=true;managerCreateMonth.disabled=true;setLoading(true,'月次シートを作成しています…');
  try{
   await api({action:'createMonthlySheets',month},'monthly');
-  status.textContent=month.replace('-','年')+'月のシフト表・勤怠表を作成しました。';
+  const successMessage=month.replace('-','年')+'月のシフト表・勤怠表を作成しました。';
+  if(month===workDateInput.value.slice(0,7)){
+   const refreshed=await load(false);
+   if(refreshed)status.textContent=successMessage;
+  }else status.textContent=successMessage;
  }catch(error){
   const result=error&&error.result;
   if(result&&result.shift&&result.attendance){
@@ -415,4 +424,5 @@ start();
 </script>
 </body>
 </html>
+
 
