@@ -12,7 +12,7 @@ const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1].replace(/\nstart
 function makePage(search, options = {}) {
   const elements = new Map();
   const get = (id) => {
-    if (!elements.has(id)) elements.set(id, { hidden: false, textContent: '', value: '', disabled: false, setAttribute() {}, addEventListener() {}, replaceChildren() {}, classList: { add() {}, remove() {} } });
+    if (!elements.has(id)) elements.set(id, { hidden: false, textContent: '', value: '', disabled: false, setAttribute() {}, addEventListener() {}, replaceChildren() {}, querySelectorAll() { return []; }, classList: { add() {}, remove() {} } });
     return elements.get(id);
   };
   const stored = new Map();

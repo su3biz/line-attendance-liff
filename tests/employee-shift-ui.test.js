@@ -12,8 +12,10 @@ assert.ok(match, 'inline LIFF script exists');
 function element() {
   return {
     value: '', textContent: '', type: '', required: false, disabled: false, hidden: false,
-    children: [], handlers: {}, attributes: {}, className: '', classList: { add() {}, remove() {} },
+    children: [], handlers: {}, attributes: {}, dataset: {}, className: '', blurCount: 0, classList: { add() {}, remove() {} },
     addEventListener(name, handler) { this.handlers[name] = handler; },
+    blur() { this.blurCount++; },
+    querySelectorAll() { return []; },
     appendChild(child) { this.children.push(child); return child; },
     append(...children) { this.children.push(...children); },
     replaceChildren(...children) { this.children = children; },
@@ -98,6 +100,33 @@ function makePage({ initialState, confirm = true, mutationFailure = null, respon
   get('workDate').value = '2026-10-05';
   return { context, get, requests, confirmMessages };
 }
+
+test('selecting a date closes the shared calendar input and reloads that date for employee and manager views', () => {
+  for (const actorRole of ['employee', 'manager']) {
+    const page = makePage();
+    if (actorRole === 'employee') {
+      page.context.render({ actorRole, dateClass: 'past', selfShift: { employeeId: 'EMP-01', displayName: '従業員01', revision: 0, stateToken: 'a'.repeat(64), schedule: null, attendance: null } });
+    } else {
+      page.context.render({ actorRole, dateClass: 'past', records: [{ employeeId: 'MGR-01', targetActorId: 'MGR-01', displayName: '店長', revision: 0, stateToken: 'b'.repeat(64), schedule: null, attendance: null }] });
+    }
+    const selectedDates = [];
+    page.get('workDate').value = '2026-10-10';
+    page.context.load = () => { selectedDates.push(page.get('workDate').value); };
+    page.get('workDate').handlers.change();
+    assert.equal(page.get('workDate').blurCount, 1, `${actorRole} calendar closes after a date is selected`);
+    assert.deepEqual(selectedDates, ['2026-10-10'], `${actorRole} loads the selected date`);
+  }
+});
+
+test('calendar month navigation has no date-change handler and does not close or reload', () => {
+  const page = makePage();
+  let loads = 0;
+  page.context.load = () => { loads++; };
+  assert.equal(page.get('workDate').handlers.click, undefined);
+  assert.equal(page.get('workDate').handlers.input, undefined);
+  assert.equal(loads, 0);
+  assert.equal(page.get('workDate').blurCount, 0);
+});
 
 test('employee can create a shift through the current entry form with the authenticated identity and revision', async () => {
   const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 2, schedule: null, attendance: null } });

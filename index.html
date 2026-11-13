@@ -341,7 +341,7 @@ document.getElementById('enrollment').addEventListener('submit',async e=>{
  finally{setLoading(false);busy=false;button.disabled=false;input.disabled=false;}
 });
 document.getElementById('retry').addEventListener('click',()=>{if(busy)return;if(authRecoveryExhausted){try{const storage=sessionStore();if(storage)storage.removeItem(AUTH_RECOVERY_SESSION_KEY);}catch(_){}authRecoveryExhausted=false;}if(liffReady)load();else start();});
-workDateInput.addEventListener('change',()=>{if(!busy)load();});
+workDateInput.addEventListener('change',()=>{workDateInput.blur();if(!busy)load();});
 entryForm.addEventListener('submit',async event=>{event.preventDefault();await mutateEntry('save');});
 deleteButton.addEventListener('click',()=>mutateEntry('delete'));
 startTimeInput.addEventListener('input',applyWriteMode);endTimeInput.addEventListener('input',applyWriteMode);
