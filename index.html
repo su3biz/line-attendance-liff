@@ -340,7 +340,7 @@ async function start(){
   liffReady=true;
   await load();
  }catch(e){trace('startup','失敗',e.code==='AUTH_RECOVERY_NAVIGATING'?'認証画面へ移動':(e.code||'起動処理失敗'));if(e.code!=='AUTH_RECOVERY_NAVIGATING'){enrollmentPanel.hidden=true;showConnectionError(e.code==='AUTHENTICATION_FAILED'?messages.AUTHENTICATION_FAILED:e.code==='TOKEN_EXPIRED_RECOVERY_FAILED'?e.message:LOAD_ERROR,e.code,e.diagnosticCode,e.httpStatus,e.verifyRequest);}}
- finally{busy=false;setLoading(false);}
+ finally{busy=false;setLoading(false);applyWriteMode();}
 }
 start();
 </script>
