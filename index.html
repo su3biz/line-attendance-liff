@@ -203,9 +203,9 @@ function renderManagerRecords(records){
 function render(data){
  list.replaceChildren();entryState=null;dateClass=data.dateClass;
  if(data.actorRole==='employee'&&data.selfShift){
-  const value=data.selfShift;if(typeof value.employeeId!=='string'||!value.employeeId||typeof value.displayName!=='string'||!value.displayName.trim()||!Number.isSafeInteger(value.revision)||value.revision<0)throw Error('self entry identity');
+  const value=data.selfShift;if(typeof value.employeeId!=='string'||!value.employeeId||typeof value.displayName!=='string'||!value.displayName.trim()||!Number.isSafeInteger(value.revision)||value.revision<0||typeof value.stateToken!=='string'||!/^[a-f0-9]{64}$/.test(value.stateToken))throw Error('self entry identity');
   const schedule=normalizeSchedule(value.schedule),attendance=normalizeAttendance(value.attendance);if(!['today','past','future'].includes(dateClass))throw Error('date class');
-  entryState={employeeId:value.employeeId,attendanceEmployeeId:value.attendanceEmployeeId||'',displayName:value.displayName,revision:value.revision,schedule,attendance,attendanceRevision:Number.isSafeInteger(value.attendanceRevision)?value.attendanceRevision:0};
+  entryState={employeeId:value.employeeId,attendanceEmployeeId:value.attendanceEmployeeId||'',displayName:value.displayName,revision:value.revision,stateToken:value.stateToken,schedule,attendance,attendanceRevision:Number.isSafeInteger(value.attendanceRevision)?value.attendanceRevision:0};
   employeeName.textContent=entryState.displayName;plannedTime.textContent=schedule?'予定: '+(schedule.startTime||'未入力')+'–'+(schedule.endTime||'未入力')+(schedule.startTime&&schedule.endTime&&schedule.endTime<schedule.startTime?'（翌日）':''):'シフト予定は未登録です。';
   startTimeInput.value=attendance?attendance.startTime:(schedule?schedule.startTime:'');endTimeInput.value=attendance?attendance.endTime:(schedule?schedule.endTime:'');entryCard.hidden=false;applyWriteMode();return;
  }
@@ -215,7 +215,8 @@ function entryOutcomeMatches(data,type,previous,expectedWorkDate,startTime,endTi
  if(!data||data.actorRole!=='employee'||!data.selfShift||data.workDate!==expectedWorkDate)return false;
  const value=data.selfShift,schedule=value.schedule||null,attendance=value.attendance||null;
  if(type==='delete')return schedule===null&&attendance===null&&value.revision===previous.revision+1;
- if(!schedule||schedule.startTime!==startTime||schedule.endTime!==endTime||value.revision!==previous.revision+1)return false;
+ const expectedRevision=!previous.schedule&&previous.revision===0?0:previous.revision+1;
+ if(!schedule||schedule.startTime!==startTime||schedule.endTime!==endTime||value.revision!==expectedRevision)return false;
  if(data.dateClass==='future'){const old=previous.attendance;return (old===null&&attendance===null)||(old&&attendance&&old.startTime===attendance.startTime&&old.endTime===attendance.endTime);}
  return !!attendance&&attendance.startTime===startTime&&attendance.endTime===endTime;
 }
@@ -230,18 +231,35 @@ async function mutateEntry(type){
  if(type==='save'){if(!validTime(startTimeInput.value)||!validTime(endTimeInput.value)||startTimeInput.value===endTimeInput.value){status.textContent=messages.INVALID_REQUEST;return;}if(dateClass!=='future'&&!attendanceWritesEnabled){status.textContent=messages.DISABLED;return;}}
  else if(type!=='delete'&&!current.schedule&&!current.attendance)return;
  let requestId;try{if(typeof crypto==='undefined'||typeof crypto.randomUUID!=='function')throw Error('安全な処理IDを生成できません。');requestId=crypto.randomUUID();}catch(err){status.textContent=err.message;return;}
- const saveDate=workDateInput.value,startTime=type==='delete'?'':startTimeInput.value,endTime=type==='delete'?'':endTimeInput.value,operation=type==='delete'?'delete':(current.schedule?'update':'create');
+ const saveDate=workDateInput.value,startTime=type==='delete'?'':startTimeInput.value,endTime=type==='delete'?'':endTimeInput.value;
  busy=true;workDateInput.disabled=true;retry.disabled=true;applyWriteMode();setLoading(true,type==='delete'?'勤務情報を削除しています…':'勤務情報を保存しています…');let failure=null,successMessage='';
- try{await api({action:'shiftMutation',type:operation,requestId,employeeId:current.employeeId,workDate:saveDate,expectedRevision:String(current.revision),startTime,endTime},'mutation');}catch(err){failure=err;}
- if(failure&&['AUTH_RECOVERY_NAVIGATING','TOKEN_EXPIRED_RECOVERY_FAILED','AUTHENTICATION_FAILED'].includes(failure.code)){
-  if(failure.code!=='AUTH_RECOVERY_NAVIGATING')showConnectionError(failure.code==='TOKEN_EXPIRED_RECOVERY_FAILED'?failure.message:messages.AUTHENTICATION_FAILED,failure.code);
-  busy=false;workDateInput.disabled=false;retry.disabled=false;applyWriteMode();setLoading(false);return;
+ try{
+  const sendMutation=async(state,id)=>api({action:'shiftMutation',type:type==='delete'?'delete':(state.schedule?'update':'create'),requestId:id,employeeId:state.employeeId,workDate:saveDate,expectedRevision:String(state.revision),expectedStateToken:state.stateToken,startTime,endTime},'mutation');
+  let verificationState=current;
+  try{await sendMutation(current,requestId);}catch(err){failure=err;}
+  if(type==='save'&&failure&&failure.code==='CONFLICT'){
+   let latest=null;try{latest=await load(false,'readback');}catch(_){/* Keep the conflict and do not retry without fresh state. */}
+   if(latest&&entryState&&workDateInput.value===saveDate&&shiftWritesEnabled&&(dateClass==='future'||attendanceWritesEnabled)){
+    verificationState=entryState;startTimeInput.value=startTime;endTimeInput.value=endTime;applyWriteMode();
+    try{await sendMutation(verificationState,crypto.randomUUID());failure=null;}catch(err){failure=err;}
+   }
+  }
+  if(failure&&['AUTH_RECOVERY_NAVIGATING','TOKEN_EXPIRED_RECOVERY_FAILED','AUTHENTICATION_FAILED'].includes(failure.code)){
+   if(failure.code!=='AUTH_RECOVERY_NAVIGATING')showConnectionError(failure.code==='TOKEN_EXPIRED_RECOVERY_FAILED'?failure.message:messages.AUTHENTICATION_FAILED,failure.code);
+   return;
+  }
+  let refreshed=null;try{refreshed=await load(false,'readback');}catch(_){/* Mutation result remains unknown; never retry a write automatically. */}
+  if(refreshed&&entryOutcomeMatches(refreshed,type,verificationState,saveDate,startTime,endTime)){clearConnectionError();successMessage=type==='delete'?'シフト表・勤怠実績の削除結果を再取得で確認しました。':'保存結果をシフト表・勤怠表の再取得で確認しました。';}
+  else if(refreshed&&failure&&failure.code&&failure.code!=='OUTCOME_UNKNOWN'&&failure.code!=='ROLLBACK_FAILED'&&failure.code!=='UNAVAILABLE'){clearConnectionError();status.textContent=failure.message||messages[failure.code]||'処理できませんでした。';}
+  else{const unknown=type==='delete'?DELETE_UNKNOWN_ERROR:SAVE_UNKNOWN_ERROR;showConnectionError(unknown);}
+  if(refreshed&&failure&&failure.code==='CONFLICT'){startTimeInput.value=startTime;endTimeInput.value=endTime;applyWriteMode();status.textContent=messages.CONFLICT;}
+ }catch(_){
+  const unknown=type==='delete'?DELETE_UNKNOWN_ERROR:SAVE_UNKNOWN_ERROR;
+  showConnectionError(unknown);
+ }finally{
+  busy=false;workDateInput.disabled=false;retry.disabled=false;applyWriteMode();setLoading(false);
+  if(successMessage)status.textContent=successMessage;
  }
- const refreshed=await load(false,'readback');
- if(refreshed&&entryOutcomeMatches(refreshed,type,current,saveDate,startTime,endTime)){clearConnectionError();successMessage=type==='delete'?'シフト表・勤怠実績の削除結果を再取得で確認しました。':'保存結果をシフト表・勤怠表の再取得で確認しました。';}
- else if(refreshed&&failure&&failure.code&&failure.code!=='OUTCOME_UNKNOWN'&&failure.code!=='ROLLBACK_FAILED'&&failure.code!=='UNAVAILABLE'){clearConnectionError();status.textContent=failure.message||messages[failure.code]||'処理できませんでした。';}
- else{const unknown=type==='delete'?DELETE_UNKNOWN_ERROR:SAVE_UNKNOWN_ERROR;showConnectionError(unknown);}
- busy=false;workDateInput.disabled=false;retry.disabled=false;applyWriteMode();setLoading(false);if(successMessage)status.textContent=successMessage;
 }
 async function load(show=true,diagnosticPhase='attendance'){
  trace('initial_data','開始','勤怠データ処理');
