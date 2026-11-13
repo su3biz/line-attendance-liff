@@ -89,6 +89,9 @@ const status=document.getElementById('status');
 const enrollmentStatus=document.getElementById('enrollmentStatus');
 const list=document.getElementById('list');
 const managerCreateSection=document.getElementById('managerCreateSection');
+const managerCreateMonth=document.getElementById('managerCreateMonth');
+const managerCreateButton=document.getElementById('managerCreateButton');
+const managerCreateError=document.getElementById('managerCreateError');
 const retry=document.getElementById('retry');
 const connectionError=document.getElementById('connectionError');
 const connectionErrorMessage=document.getElementById('connectionErrorMessage');
@@ -121,13 +124,13 @@ const DELETE_UNKNOWN_ERROR='削除結果を確認できませんでした。再�
 const REQUEST_TIMEOUT_MS=20000;
 const LIFF_INIT_TIMEOUT_MS=15000;
 const AUTH_RECOVERY_SESSION_KEY='lineAttendanceAuthRecoveryAttempt';
-const messages={REGISTRATION_INVALID:'登録コードを確認できません。',ALREADY_REGISTERED:'このLINEアカウントは登録済みです。',DISABLED:'機能が停止中です。',AUTHENTICATION_FAILED:'LINE本人確認に失敗しました。',AUTHORIZATION_DENIED:'利用者設定を確認できません。',NOT_FOUND:'対象の勤務情報を確認できません。',CONFLICT:'別の操作で更新されています。勤怠情報を再取得してください。',UNAVAILABLE:'保存結果を確認できません。重複書き込みを避けるため再送せず、シフト表・勤怠表と変更履歴を確認してください。',SAVE_FAILED:'保存に失敗しました。変更前の状態への復旧が確認されています。入力内容を確認して再度操作してください。',SAVE_UNKNOWN:'保存結果を確定できません。重複書き込みを避けるため再送せず、シフト表・勤怠表と変更履歴を確認してください。',INVALID_REQUEST:'開始・終了時刻を確認してください。',WRITE_FAILED:'保存に失敗しました。変更前の状態への復旧が確認されています。',ROLLBACK_FAILED:'一部の更新に失敗し、復旧を確認できません。再送せず、両方の表と変更履歴を確認してください。',OUTCOME_UNKNOWN:'保存結果を確定できません。再送せず、両方の表と変更履歴を確認してください。',IDEMPOTENCY_CONFLICT:'同じ処理IDで異なる内容が検出されました。再接続して最新状態を確認してください。',STORAGE_UNAVAILABLE:'保存先の状態を確認できません。管理者に確認してください。',STORAGE_NOT_CONFIGURED:'保存先が設定されていません。管理者に確認してください。',FORBIDDEN:'この操作は許可されていません。',UNTRUSTED_ACTOR:'LINE本人確認に失敗しました。',FUTURE_ACTUAL_ONLY:'未来日の勤怠実績のみの記録は保存できません。日付を確認してください。'};
+const messages={REGISTRATION_INVALID:'登録コードを確認できません。',ALREADY_REGISTERED:'このLINEアカウントは登録済みです。',DISABLED:'機能が停止中です。',AUTHENTICATION_FAILED:'LINE本人確認に失敗しました。',AUTHORIZATION_DENIED:'利用者設定を確認できません。',NOT_FOUND:'対象の勤務情報を確認できません。',CONFLICT:'別の操作で更新されています。勤怠情報を再取得してください。',UNAVAILABLE:'保存結果を確認できません。重複書き込みを避けるため再送せず、シフト表・勤怠表と変更履歴を確認してください。',SAVE_FAILED:'保存に失敗しました。変更前の状態への復旧が確認されています。入力内容を確認して再度操作してください。',SAVE_UNKNOWN:'保存結果を確定できません。重複書き込みを避けるため再送せず、シフト表・勤怠表と変更履歴を確認してください。',INVALID_REQUEST:'開始・終了時刻を確認してください。',WRITE_FAILED:'保存に失敗しました。変更前の状態への復旧が確認されています。',ROLLBACK_FAILED:'一部の更新に失敗し、復旧を確認できません。再送せず、両方の表と変更履歴を確認してください。',OUTCOME_UNKNOWN:'保存結果を確定できません。再送せず、両方の表と変更履歴を確認してください。',IDEMPOTENCY_CONFLICT:'同じ処理IDで異なる内容が検出されました。再接続して最新状態を確認してください。',STORAGE_UNAVAILABLE:'保存先の状態を確認できません。管理者に確認してください。',STORAGE_NOT_CONFIGURED:'保存先が設定されていません。管理者に確認してください。',FORBIDDEN:'この操作は許可されていません。',UNTRUSTED_ACTOR:'LINE本人確認に失敗しました。',FUTURE_ACTUAL_ONLY:'未来日の勤怠実績のみの記録は保存できません。日付を確認してください。',MONTHLY_CREATE_FAILED:'月次シートを作成できませんでした。下の結果を確認してください。',MONTHLY_CREATE_PARTIAL:'シフト表または勤怠表の一方だけ作成できませんでした。下の結果を確認してください。'};
 const AUTH_FAILURE_DIAGNOSTIC_CODES=new Set(['VERIFY_CONFIG_INVALID','VERIFY_TRANSPORT_ERROR','VERIFY_RESPONSE_INVALID','VERIFY_HTTP_ERROR','VERIFY_RESPONSE_READ_ERROR','VERIFY_JSON_INVALID','CLAIM_ISSUER_MISMATCH','CLAIM_AUDIENCE_MISMATCH','CLAIM_SUB_INVALID','CLAIM_EXPIRY_INVALID','CLAIM_EXPIRED']);
 function setLoading(active,message='勤怠情報を読み込んでいます…'){loadingMessage.textContent=message;loading.hidden=!active;app.setAttribute('aria-busy',String(active));}
 function withTimeout(promise,ms,message){let timer;const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(message)),ms);});return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer));}
 const CLIENT_DIAGNOSTIC_CODES=new Set(['CLIENT_TRANSPORT_ERROR','CLIENT_HTTP_ERROR','CLIENT_RESPONSE_PARSE_ERROR','CLIENT_SERVER_REJECTED']);
-const CLIENT_DIAGNOSTIC_PHASES=new Set(['attendance','mutation','readback','registration']);
-const CLIENT_DIAGNOSTIC_STAGES=new Set(['attendance-fetch','attendance-http','attendance-response','attendance-application','mutation-fetch','mutation-http','mutation-response','mutation-application','readback-fetch','readback-http','readback-response','readback-application','registration-fetch','registration-http','registration-response','registration-application']);
+const CLIENT_DIAGNOSTIC_PHASES=new Set(['attendance','mutation','readback','registration','monthly']);
+const CLIENT_DIAGNOSTIC_STAGES=new Set(['attendance-fetch','attendance-http','attendance-response','attendance-application','mutation-fetch','mutation-http','mutation-response','mutation-application','readback-fetch','readback-http','readback-response','readback-application','registration-fetch','registration-http','registration-response','registration-application','monthly-fetch','monthly-http','monthly-response','monthly-application']);
 function clientDiagnostic(code,stage){if(!CLIENT_DIAGNOSTIC_CODES.has(code)||!CLIENT_DIAGNOSTIC_STAGES.has(stage))return;try{console.info('WORK_ENTRY_DIAGNOSTIC '+JSON.stringify({code,stage}));}catch(_){} }
 let authRecoveryExhausted=false;
 function sessionStore(){try{return typeof window!=='undefined'?window.sessionStorage:null;}catch(_){return null;}}
@@ -173,7 +176,7 @@ async function api(fields,phase='attendance'){
   if(!r.ok){diagnostic('gas','未判定');trace('http_response','失敗','HTTP '+r.status);trace('server_trace','スキップ','HTTP error response');clientDiagnostic('CLIENT_HTTP_ERROR',safePhase+'-http');throw Error('通信結果を確認できません。');}
   let result;trace('response_body','開始','本文を解析');try{result=await r.json();diagnostic('json','成功');trace('response_body','成功','JSON本文を取得');}catch(err){diagnostic('json','失敗');trace('response_body','失敗','JSON本文を取得できません');trace('server_trace','スキップ','応答本文なし');clientDiagnostic('CLIENT_RESPONSE_PARSE_ERROR',safePhase+'-response');throw err;}
   if(!result||typeof result!=='object'||Array.isArray(result)){diagnostic('json','失敗');trace('api_result','失敗','response shape invalid');trace('server_trace','スキップ','trace unavailable');clientDiagnostic('CLIENT_RESPONSE_PARSE_ERROR',safePhase+'-response');throw Error('通信結果を確認できません。');}
-  if(!result.ok){const safeCode=typeof result.code==='string'&&Object.prototype.hasOwnProperty.call(messages,result.code)?result.code:'OTHER';diagnostic('gas','失敗（'+safeCode+'）');trace('api_result','失敗','code '+safeCode);if(diagnosticEnabled&&Array.isArray(result.trace))for(const item of result.trace){if(item&&/^[a-z0-9_-]{1,48}$/.test(item.stage||'')&&['開始','成功','失敗','スキップ','情報'].includes(item.state))trace('gas_'+item.stage,item.state,'server +'+(Number.isFinite(item.ms)?item.ms:'?')+'ms');}else trace('server_trace','スキップ','応答にサーバートレースなし');if(result.code==='AUTHENTICATION_FAILED'&&AUTH_FAILURE_DIAGNOSTIC_CODES.has(result.diagnosticCode)){trace('auth_verify','失敗','code '+result.diagnosticCode+(result.diagnosticCode==='VERIFY_HTTP_ERROR'&&Number.isInteger(result.httpStatus)&&result.httpStatus>=100&&result.httpStatus<=599?' / HTTP '+result.httpStatus:''));}clientDiagnostic('CLIENT_SERVER_REJECTED',safePhase+'-application');const e=Error(messages[result.code]||'処理できませんでした。');e.code=result.code;if(result.code==='AUTHENTICATION_FAILED'&&AUTH_FAILURE_DIAGNOSTIC_CODES.has(result.diagnosticCode)){e.diagnosticCode=result.diagnosticCode;if(result.diagnosticCode==='VERIFY_HTTP_ERROR'&&Number.isInteger(result.httpStatus)&&result.httpStatus>=100&&result.httpStatus<=599)e.httpStatus=result.httpStatus;if(result.verifyRequest&&typeof result.verifyRequest==='object')e.verifyRequest=result.verifyRequest;}throw e;}
+  if(!result.ok){const safeCode=typeof result.code==='string'&&Object.prototype.hasOwnProperty.call(messages,result.code)?result.code:'OTHER';diagnostic('gas','失敗（'+safeCode+'）');trace('api_result','失敗','code '+safeCode);if(diagnosticEnabled&&Array.isArray(result.trace))for(const item of result.trace){if(item&&/^[a-z0-9_-]{1,48}$/.test(item.stage||'')&&['開始','成功','失敗','スキップ','情報'].includes(item.state))trace('gas_'+item.stage,item.state,'server +'+(Number.isFinite(item.ms)?item.ms:'?')+'ms');}else trace('server_trace','スキップ','応答にサーバートレースなし');if(result.code==='AUTHENTICATION_FAILED'&&AUTH_FAILURE_DIAGNOSTIC_CODES.has(result.diagnosticCode)){trace('auth_verify','失敗','code '+result.diagnosticCode+(result.diagnosticCode==='VERIFY_HTTP_ERROR'&&Number.isInteger(result.httpStatus)&&result.httpStatus>=100&&result.httpStatus<=599?' / HTTP '+result.httpStatus:''));}clientDiagnostic('CLIENT_SERVER_REJECTED',safePhase+'-application');const e=Error(messages[result.code]||'処理できませんでした。');e.code=result.code;e.result=result;if(result.code==='AUTHENTICATION_FAILED'&&AUTH_FAILURE_DIAGNOSTIC_CODES.has(result.diagnosticCode)){e.diagnosticCode=result.diagnosticCode;if(result.diagnosticCode==='VERIFY_HTTP_ERROR'&&Number.isInteger(result.httpStatus)&&result.httpStatus>=100&&result.httpStatus<=599)e.httpStatus=result.httpStatus;if(result.verifyRequest&&typeof result.verifyRequest==='object')e.verifyRequest=result.verifyRequest;}throw e;}
   diagnostic('gas','成功（ok=true）');
   trace('api_result','成功','ok=true');if(diagnosticEnabled&&Array.isArray(result.trace))for(const item of result.trace){if(item&&/^[a-z0-9_-]{1,48}$/.test(item.stage||'')&&['開始','成功','失敗','スキップ','情報'].includes(item.state))trace('gas_'+item.stage,item.state,'server +'+(Number.isFinite(item.ms)?item.ms:'?')+'ms');}else trace('server_trace','スキップ','応答にサーバートレースなし');
   return result;
@@ -353,6 +356,26 @@ document.getElementById('enrollment').addEventListener('submit',async e=>{
 });
 document.getElementById('retry').addEventListener('click',()=>{if(busy)return;if(authRecoveryExhausted){try{const storage=sessionStore();if(storage)storage.removeItem(AUTH_RECOVERY_SESSION_KEY);}catch(_){}authRecoveryExhausted=false;}if(liffReady)load();else start();});
 workDateInput.addEventListener('change',()=>{workDateInput.blur();if(!busy)load();});
+managerCreateButton.addEventListener('click',async()=>{
+ if(busy)return;
+ managerCreateError.hidden=true;managerCreateError.textContent='';
+ const month=managerCreateMonth.value;
+ if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)){managerCreateError.textContent='作成する年月を選択してください。';managerCreateError.hidden=false;return;}
+ busy=true;managerCreateButton.disabled=true;managerCreateMonth.disabled=true;setLoading(true,'月次シートを作成しています…');
+ try{
+  await api({action:'createMonthlySheets',month},'monthly');
+  status.textContent=month.replace('-','年')+'月のシフト表・勤怠表を作成しました。';
+ }catch(error){
+  const result=error&&error.result;
+  if(result&&result.shift&&result.attendance){
+   const label=value=>value.created?'作成済み':value.reason==='EXISTS'?'同名の既存シートがあるため未作成':value.reason==='CLEANUP_FAILED'?'作成後の整理に失敗しました。シート状態を確認してください':'作成失敗';
+   managerCreateError.textContent='シフト表：'+label(result.shift)+'\n勤怠表：'+label(result.attendance)+'\n既存シートは変更していません。';
+  }else if(error&&error.code==='INVALID_REQUEST')managerCreateError.textContent='作成する年月を確認してください。';
+  else if(error&&error.code==='UNAVAILABLE')managerCreateError.textContent='月次シートの作成結果を確認できません。重複操作を避けるため、対象月のシート名を確認してください。';
+  else managerCreateError.textContent=error&&error.message?error.message:'月次シートを作成できませんでした。';
+  managerCreateError.hidden=false;
+ }finally{busy=false;managerCreateButton.disabled=false;managerCreateMonth.disabled=false;setLoading(false);applyWriteMode();}
+});
 entryForm.addEventListener('submit',async event=>{event.preventDefault();await mutateEntry('save');});
 deleteButton.addEventListener('click',()=>mutateEntry('delete'));
 startTimeInput.addEventListener('input',applyWriteMode);endTimeInput.addEventListener('input',applyWriteMode);
