@@ -8,8 +8,11 @@
 <title>LINE勤怠</title>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
-:root{font-family:system-ui,sans-serif;color:#202b26;background:#f4f7f5}body{margin:0}main{max-width:680px;margin:auto;padding:20px}article{background:#fff;border-radius:12px;padding:16px;margin:12px 0}label{display:block;margin:12px 0}input,button{font:inherit;padding:10px}button{background:#06a94d;color:#fff;border:0;border-radius:8px;min-height:44px}button:disabled{opacity:.5}[hidden]{display:none!important}#status,#enrollmentStatus,#connectionErrorMessage{white-space:pre-wrap}.muted{color:#58645e;font-size:.95rem}.times{font-weight:600}.nextday{font-size:.9em;color:#58645e}
+.entry-form label,.manager-entry-form label{display:flex;align-items:center;gap:4px}.manager-create-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.manager-create-controls input[type=month]{min-height:48px;min-width:180px}.manager-create-controls button{min-width:150px;min-height:48px}.manager-create-error,.month-sheets-message{color:#b52f2f;white-space:pre-wrap}
+:root{font-family:system-ui,sans-serif;color:#202b26;background:#f4f7f5}body{margin:0}main{max-width:680px;margin:auto;padding:20px}article,.entry-card{background:#fff;border-radius:12px;padding:16px;margin:12px 0}label{display:block;margin:12px 0}input,button{font:inherit;padding:10px}button{background:#06a94d;color:#fff;border:0;border-radius:8px;min-height:44px}button:disabled{opacity:.5}[hidden]{display:none!important}#status,#enrollmentStatus,#connectionErrorMessage{white-space:pre-wrap}#diagnostics{background:#fff;border:1px solid #9ab5a4;border-radius:10px;padding:12px;margin-bottom:16px;font-size:.9rem}#diagnostics h2{font-size:1rem;margin:0 0 8px}#diagnostics dl{display:grid;grid-template-columns:minmax(130px,1fr) 2fr;gap:4px 10px;margin:0}#diagnostics dd{margin:0;overflow-wrap:anywhere}#traceOutput{display:block;max-height:18rem;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,monospace;background:#f5f7f6;padding:8px}.muted{color:#58645e;font-size:.95rem}.times{font-weight:600}.nextday{font-size:.9em;color:#58645e}.entry-actions{display:flex;align-items:center;gap:20px;margin-top:24px}.save-action,.delete-action{margin:0;padding:0;border:0}.delete-action button{background:#fff;color:#b52f2f;border:1.5px solid #cf4141;min-width:120px}.save-action button{min-width:120px}
 #loading{position:fixed;inset:0;z-index:10;display:grid;place-items:center;background:#fff;padding:20px}
+#lineSubId{margin:12px 0 0;overflow-wrap:anywhere;font-size:.9rem;color:#58645e}
+
 .loading-card{background:#fff;border-radius:12px;padding:24px;min-width:220px;text-align:center;box-shadow:0 4px 24px #0003}
 #attendancePanel.connection-error > :not(#connectionError){display:none!important}
 .spinner{width:28px;height:28px;margin:0 auto 12px;border:4px solid #dce6df;border-top-color:#06a94d;border-radius:50%;animation:spin .8s linear infinite}
@@ -17,7 +20,8 @@
 </style>
 </head>
 <body>
-<main id="app">
+<main id="app" data-auth-diagnostics="disabled">
+<section id="diagnostics" aria-live="polite" hidden><h2>DEV接続トレース（機密情報は表示しません）</h2><p>段階・経過時間・安全な状態だけを表示します。通信先へ到達しない場合、サーバー側トレースは取得できません。</p><button id="copyTrace" type="button">トレースをコピー</button><pre id="traceOutput" tabindex="0" aria-label="接続トレース"></pre><dl><dt>画面ロード</dt><dd id="diag-start">未実行</dd><dt>fetch</dt><dd id="diag-fetch">未取得</dd><dt>HTTP status</dt><dd id="diag-http">未取得</dd><dt>JSON解析</dt><dd id="diag-json">未実行</dd><dt>GAS応答</dt><dd id="diag-gas">未判定</dd><dt>応答後処理</dt><dd id="diag-processing">未実行</dd><dt>描画</dt><dd id="diag-render">未実行</dd></dl></section>
 <section id="enrollmentPanel" hidden>
 <h1>LINE利用登録</h1>
 <p>管理者から受け取った登録コードを入力してください。</p>
@@ -28,13 +32,32 @@
 <p id="enrollmentStatus" role="status" aria-live="polite"></p>
 </section>
 <section id="attendancePanel" hidden>
-<section id="connectionError" role="alert" hidden><h1>通信エラーが発生しました。</h1><p id="connectionErrorMessage"></p><button id="retry" type="button">再接続</button></section>
+<section id="connectionError" role="alert" hidden><h1 id="connectionErrorHeading">通信エラーが発生しました。</h1><p id="connectionErrorMessage"></p><p id="authErrorCode" hidden>エラーコード：AUTHENTICATION_FAILED</p><p id="authDiagnosticCode" hidden></p><p id="authHttpStatus" hidden></p><section id="authDetails" hidden><h2>一時認証診断</h2><p>decodedの内容は未検証です。表示は真偽判定のみです。</p><dl><dt>IDトークン取得</dt><dd id="authTokenPresent">未確認</dd><dt>起動時トークン判定</dt><dd id="authTokenReason">未確認</dd><dt>期限切れ経過</dt><dd id="authExpiredSeconds">未確認</dd><dt>aud一致</dt><dd id="authAudMatches">未確認</dd><dt>iss一致</dt><dd id="authIssMatches">未確認</dd><dt>exp期限内</dt><dd id="authExpValid">未確認</dd><dt>sub存在</dt><dd id="authSubPresent">未確認</dd><dt>iat妥当</dt><dd id="authIatValid">未確認</dd><dt>Verify URL</dt><dd id="verifyUrlOk">未確認</dd><dt>Verify method</dt><dd id="verifyMethodOk">未確認</dd><dt>contentType</dt><dd id="verifyContentTypeOk">未確認</dd><dt>id_token存在・型</dt><dd id="verifyIdTokenOk">未確認</dd><dt>client_id存在・型</dt><dd id="verifyClientIdOk">未確認</dd><dt>client_id一致</dt><dd id="verifyClientIdMatches">未確認</dd><dt>設定チャネル一致</dt><dd id="verifyConfiguredChannelMatches">未確認</dd></dl></section><button id="retry" type="button">再接続</button></section>
 <h1>勤務予定・実績</h1>
-<p>勤務日と勤務時間を確認し、実際に働いた時間を入力してください。<br>保存すると、勤怠表に反映されます。</p>
-<label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" value="2026-10-01" required></label>
-<p class="muted">勤怠実績が登録されている場合は、登録済みの勤務時間を表示します。<br>未登録の場合は、シフト表の予定時間を表示します。</p>
+<p>勤務日と勤務時間を確認してください。保存すると、対象日に応じてシフト表と勤怠表へ反映されます。</p>
+<label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" required></label>
+<p id="monthSheetsMessage" class="month-sheets-message" role="status" aria-live="polite" hidden></p>
+<section id="entryCard" class="entry-card" hidden>
+<h2 id="employeeName">勤務</h2>
+<p id="plannedTime" class="times">予定: 未登録</p>
+<form id="entryForm">
+<label>開始 <input id="startTime" type="time" required></label>
+<label>終了 <input id="endTime" type="time" required></label>
+<div class="entry-actions"><div class="save-action"><button id="saveButton" type="submit">保存</button></div>
+<div class="delete-action"><button id="deleteButton" type="button">削除</button></div></div>
+</form>
+</section>
 <p id="status" role="status" aria-live="polite"></p>
 <div id="list"></div>
+<section id="managerCreateSection" hidden>
+<h1>シフト表・勤怠表作成</h1>
+<p>指定月のシフト表・勤怠表を作成します。</p>
+<div class="manager-create-controls">
+<input id="managerCreateMonth" type="month" aria-label="作成する年月">
+<button id="managerCreateButton" type="button">作成</button>
+</div>
+<p id="managerCreateError" class="manager-create-error" role="alert" hidden></p>
+</section>
 </section>
 <div id="loading" role="status" aria-live="polite" aria-atomic="true" hidden>
 <div class="loading-card"><div class="spinner" aria-hidden="true"></div><div id="loadingMessage">読み込み中…</div></div>
@@ -43,76 +66,286 @@
 <script>
 'use strict';
 const LIFF_ID='2012227652-CgVMkyBb';
-const GAS_URL='https://script.google.com/macros/s/AKfycbzYQkx1NBTCGpqR6XGVXCgNP0s3PfE7_gZt2-FhhTkmFIKGhGoyqq6DA46rdNEXqqII/exec';
+const GAS_URL='https://script.google.com/macros/s/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS/exec';
 let token='',busy=false,requestSequence=0,liffReady=false,liffInitPromise=null;
 const app=document.getElementById('app');
+// This entry point is bound to the existing DEV LIFF and DEV GAS deployment. DEMO has its own entry point and credentials.
+const diagnosticEnabled=LIFF_ID==='2012227652-CgVMkyBb'&&GAS_URL==='https://script.google.com/macros/s/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS/exec';
+const diagnosticPanel=document.getElementById('diagnostics');
+function diagnostic(id,value){if(!diagnosticEnabled)return;const node=document.getElementById('diag-'+id);if(node)node.textContent=value;}
+const traceStartedAt=Date.now(),traceEvents=[];
+function trace(stage,state,detail=''){
+ if(!diagnosticEnabled)return;
+ const safeStage=/^[a-z0-9_-]{1,48}$/.test(stage)?stage:'unknown';
+ const safeState=['開始','成功','失敗','スキップ','情報'].includes(state)?state:'情報';
+ const rawDetail=String(detail);
+ const safeDetail=/(?:token|authorization|access.?key|secret|spreadsheet|employee.?id|line.?id|\bsub\b|\baud\b|\bstate\b)/i.test(rawDetail)?'':rawDetail.replace(/[^\p{L}\p{N}_ .:=()/-]/gu,'').slice(0,100);
+ traceEvents.push({n:traceEvents.length+1,ms:Date.now()-traceStartedAt,stage:safeStage,state:safeState,detail:safeDetail});
+ const out=document.getElementById('traceOutput');
+ if(out)out.textContent=traceEvents.map(x=>String(x.n).padStart(2,'0')+'  +'+x.ms+'ms  '+x.stage+'  '+x.state+(x.detail?'  '+x.detail:'')).join('\n');
+}
+trace('page_load','成功','診断スクリプト開始');
+document.getElementById('copyTrace').addEventListener('click',async()=>{if(!diagnosticEnabled)return;try{await navigator.clipboard.writeText(document.getElementById('traceOutput').textContent);trace('trace_copy','成功');}catch(_){trace('trace_copy','失敗','Clipboard unavailable');}});
 const status=document.getElementById('status');
 const enrollmentStatus=document.getElementById('enrollmentStatus');
 const list=document.getElementById('list');
+const managerCreateSection=document.getElementById('managerCreateSection');
+const managerCreateMonth=document.getElementById('managerCreateMonth');
+const managerCreateButton=document.getElementById('managerCreateButton');
+const managerCreateError=document.getElementById('managerCreateError');
+const monthSheetsMessage=document.getElementById('monthSheetsMessage');
 const retry=document.getElementById('retry');
 const connectionError=document.getElementById('connectionError');
 const connectionErrorMessage=document.getElementById('connectionErrorMessage');
+const connectionErrorHeading=document.getElementById('connectionErrorHeading');
+const authErrorCode=document.getElementById('authErrorCode');
+const authDiagnosticCode=document.getElementById('authDiagnosticCode');
+const authHttpStatus=document.getElementById('authHttpStatus');
+const authDetails=document.getElementById('authDetails');
+const authTokenReason=document.getElementById('authTokenReason');
+const authExpiredSeconds=document.getElementById('authExpiredSeconds');
+let clientTokenDiagnostic=null;
 const loading=document.getElementById('loading');
 const loadingMessage=document.getElementById('loadingMessage');
 const enrollmentPanel=document.getElementById('enrollmentPanel');
 const attendancePanel=document.getElementById('attendancePanel');
 const workDateInput=document.getElementById('workDate');
+const initialLocalDate=new Date();
+workDateInput.value=[initialLocalDate.getFullYear(),String(initialLocalDate.getMonth()+1).padStart(2,'0'),String(initialLocalDate.getDate()).padStart(2,'0')].join('-');
+const entryCard=document.getElementById('entryCard');
+const employeeName=document.getElementById('employeeName');
+const plannedTime=document.getElementById('plannedTime');
+const entryForm=document.getElementById('entryForm');
+const startTimeInput=document.getElementById('startTime');
+const endTimeInput=document.getElementById('endTime');
+const saveButton=document.getElementById('saveButton');
+const deleteButton=document.getElementById('deleteButton');
+let entryState=null,dateClass='invalid',shiftWritesEnabled=false,attendanceWritesEnabled=false,selectedManagerEmployeeId='';
 const BASE_DATE='2026-10-01';
 const LOAD_ERROR='通信エラーが発生しました。サーバーに接続できませんでした。通信状態を確認し、「再接続」を押してください。';
-const SAVE_UNKNOWN_ERROR='勤怠情報が保存されたか確認できませんでした。通信状態を確認し、「再接続」を押してください。';
+const SAVE_UNKNOWN_ERROR='保存結果を確認できませんでした。重複書き込みを避けるため再保存せず、再接続して最新状態を確認してください。';
+const DELETE_UNKNOWN_ERROR='削除結果を確認できませんでした。再送せず、再接続してシフト表・勤怠表の状態を確認してください。';
 const REQUEST_TIMEOUT_MS=20000;
 const LIFF_INIT_TIMEOUT_MS=15000;
-const messages={REGISTRATION_INVALID:'登録コードを確認できません。',ALREADY_REGISTERED:'このLINEアカウントは登録済みです。',DISABLED:'機能が停止中です。',AUTHENTICATION_FAILED:'LINE本人確認に失敗しました。',AUTHORIZATION_DENIED:'利用者設定を確認できません。',NOT_FOUND:'対象の勤務予定を確認できません。',CONFLICT:'別の操作で更新されています。勤怠情報を再取得してください。',UNAVAILABLE:'保存結果を確認できません。二重保存を避けるため再保存せず、勤怠表と変更履歴を確認してください。',SAVE_FAILED:'保存に失敗しました。勤怠管理表には反映されていません。入力内容を確認して再度保存してください。',SAVE_UNKNOWN:'保存結果を確定できません。二重保存を避けるため再保存せず、勤怠表と変更履歴を確認してください。',INVALID_REQUEST:'入力時刻を確認してください。'};
+const AUTH_RECOVERY_SESSION_KEY='lineAttendanceAuthRecoveryAttempt';
+const messages={REGISTRATION_INVALID:'登録コードを確認できません。',ALREADY_REGISTERED:'このLINEアカウントは登録済みです。',DISABLED:'機能が停止中です。',AUTHENTICATION_FAILED:'LINE本人確認に失敗しました。',AUTHORIZATION_DENIED:'利用者設定を確認できません。',NOT_FOUND:'対象の勤務情報を確認できません。',CONFLICT:'別の操作で更新されています。勤怠情報を再取得してください。',UNAVAILABLE:'保存結果を確認できません。重複書き込みを避けるため再送せず、シフト表・勤怠表と変更履歴を確認してください。',SAVE_FAILED:'保存に失敗しました。変更前の状態への復旧が確認されています。入力内容を確認して再度操作してください。',SAVE_UNKNOWN:'保存結果を確定できません。重複書き込みを避けるため再送せず、シフト表・勤怠表と変更履歴を確認してください。',INVALID_REQUEST:'開始・終了時刻を確認してください。',WRITE_FAILED:'保存に失敗しました。変更前の状態への復旧が確認されています。',ROLLBACK_FAILED:'一部の更新に失敗し、復旧を確認できません。再送せず、両方の表と変更履歴を確認してください。',OUTCOME_UNKNOWN:'保存結果を確定できません。再送せず、両方の表と変更履歴を確認してください。',IDEMPOTENCY_CONFLICT:'同じ処理IDで異なる内容が検出されました。再接続して最新状態を確認してください。',STORAGE_UNAVAILABLE:'保存先の状態を確認できません。管理者に確認してください。',STORAGE_NOT_CONFIGURED:'保存先が設定されていません。管理者に確認してください。',FORBIDDEN:'この操作は許可されていません。',UNTRUSTED_ACTOR:'LINE本人確認に失敗しました。',FUTURE_ACTUAL_ONLY:'未来日の勤怠実績のみの記録は保存できません。日付を確認してください。',MONTHLY_CREATE_FAILED:'月次シートを作成できませんでした。下の結果を確認してください。',MONTHLY_CREATE_PARTIAL:'シフト表または勤怠表の一方だけ作成できませんでした。下の結果を確認してください。'};
+const AUTH_FAILURE_DIAGNOSTIC_CODES=new Set(['VERIFY_CONFIG_INVALID','VERIFY_TRANSPORT_ERROR','VERIFY_RESPONSE_INVALID','VERIFY_HTTP_ERROR','VERIFY_RESPONSE_READ_ERROR','VERIFY_JSON_INVALID','CLAIM_ISSUER_MISMATCH','CLAIM_AUDIENCE_MISMATCH','CLAIM_SUB_INVALID','CLAIM_EXPIRY_INVALID','CLAIM_EXPIRED']);
 function setLoading(active,message='勤怠情報を読み込んでいます…'){loadingMessage.textContent=message;loading.hidden=!active;app.setAttribute('aria-busy',String(active));}
 function withTimeout(promise,ms,message){let timer;const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(message)),ms);});return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer));}
-async function api(fields){const body=new URLSearchParams({id_token:token,...fields});const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),REQUEST_TIMEOUT_MS);try{const r=await fetch(GAS_URL,{method:'POST',body,redirect:'follow',referrerPolicy:'no-referrer',signal:controller.signal});if(!r.ok)throw Error('通信結果を確認できません。');const result=await r.json();if(!result.ok){const message=result.code==='UNAVAILABLE'&&fields.action!=='saveActual'?'通信エラーが発生しました。サーバーに接続できませんでした。通信状態を確認し、「再接続」を押してください。':(messages[result.code]||'処理できませんでした。');const e=Error(message);e.code=result.code;throw e;}return result;}finally{clearTimeout(timer);}}
-function showConnectionError(message=LOAD_ERROR){attendancePanel.hidden=false;attendancePanel.classList.add('connection-error');connectionError.hidden=false;connectionErrorMessage.textContent=message;list.replaceChildren();status.textContent='';}
-function clearConnectionError(){attendancePanel.classList.remove('connection-error');connectionError.hidden=true;}
+const CLIENT_DIAGNOSTIC_CODES=new Set(['CLIENT_TRANSPORT_ERROR','CLIENT_HTTP_ERROR','CLIENT_RESPONSE_PARSE_ERROR','CLIENT_SERVER_REJECTED']);
+const CLIENT_DIAGNOSTIC_PHASES=new Set(['attendance','mutation','readback','registration','monthly']);
+const CLIENT_DIAGNOSTIC_STAGES=new Set(['attendance-fetch','attendance-http','attendance-response','attendance-application','mutation-fetch','mutation-http','mutation-response','mutation-application','readback-fetch','readback-http','readback-response','readback-application','registration-fetch','registration-http','registration-response','registration-application','monthly-fetch','monthly-http','monthly-response','monthly-application']);
+function clientDiagnostic(code,stage){if(!CLIENT_DIAGNOSTIC_CODES.has(code)||!CLIENT_DIAGNOSTIC_STAGES.has(stage))return;try{console.info('WORK_ENTRY_DIAGNOSTIC '+JSON.stringify({code,stage}));}catch(_){} }
+let authRecoveryExhausted=false;
+function sessionStore(){try{return typeof window!=='undefined'?window.sessionStorage:null;}catch(_){return null;}}
+function tokenSnapshot(){
+ let currentToken='',decoded=null;try{currentToken=liff.getIDToken()||'';}catch(_){}try{decoded=liff.getDecodedIDToken();}catch(_){}
+ const exp=decoded&&decoded.exp,expValid=typeof exp==='number'&&Number.isFinite(exp)&&exp>0,tokenPresent=typeof currentToken==='string'&&currentToken.length>0,now=Date.now()/1000;
+ let reason='TOKEN_VALID',expiredSeconds=null;if(!tokenPresent)reason='TOKEN_NOT_FOUND';else if(!expValid)reason='EXP_INVALID';else if(exp<=now){reason='TOKEN_EXPIRED';expiredSeconds=Math.floor(now-exp);}
+ token=currentToken;clientTokenDiagnostic={tokenPresent,reason,expiredSeconds,audMatches:!!decoded&&String(decoded.aud)==='2012227652',issMatches:!!decoded&&decoded.iss==='https://access.line.me',expValid:expValid&&exp>now,subPresent:!!decoded&&typeof decoded.sub==='string'&&decoded.sub.length>0,iatValid:!!decoded&&Number.isSafeInteger(decoded.iat)&&decoded.iat>0&&decoded.iat<=now+60};
+ return {valid:reason==='TOKEN_VALID',reason};
+}
+function recoveryError(code,message){const error=Error(message);error.code=code;return error;}
+function expiredRecoveryFailure(){authRecoveryExhausted=true;return recoveryError('TOKEN_EXPIRED_RECOVERY_FAILED','LINEの本人確認情報の有効期限が切れています。安全のため、勤怠データの取得・保存は行っていません。\n\nLINEアプリのトークから勤怠を開き直してください。');}
+function beginExpiredTokenRecovery(){
+ if(authRecoveryExhausted)throw expiredRecoveryFailure();
+ const storage=sessionStore();if(!storage)throw expiredRecoveryFailure();
+ try{if(storage.getItem(AUTH_RECOVERY_SESSION_KEY))throw expiredRecoveryFailure();}catch(error){if(error&&error.code==='TOKEN_EXPIRED_RECOVERY_FAILED')throw error;throw expiredRecoveryFailure();}
+ let inLiffBrowser=false;try{inLiffBrowser=liff.isInClient();}catch(_){throw expiredRecoveryFailure();}
+ try{storage.setItem(AUTH_RECOVERY_SESSION_KEY,inLiffBrowser?'liff-reload':'line-login');}catch(_){throw expiredRecoveryFailure();}
+ authRecoveryExhausted=true;
+ try{
+  if(inLiffBrowser){window.location.reload();throw recoveryError('AUTH_RECOVERY_NAVIGATING','認証を再確認しています…');}
+  if(liff.isLoggedIn())liff.logout();
+  liff.login({redirectUri:window.location.href});
+  throw recoveryError('AUTH_RECOVERY_NAVIGATING','LINEのログイン画面へ移動しています…');
+ }catch(error){if(error&&error.code==='AUTH_RECOVERY_NAVIGATING')throw error;throw expiredRecoveryFailure();}
+}
+async function ensureFreshIdToken(){
+ const state=tokenSnapshot();if(state.valid)return;
+ if(state.reason==='TOKEN_EXPIRED')beginExpiredTokenRecovery();
+ throw recoveryError('AUTHENTICATION_FAILED','LINE本人確認情報を取得できません。');
+}
+async function api(fields,phase='attendance'){
+ const safePhase=CLIENT_DIAGNOSTIC_PHASES.has(phase)?phase:'attendance';
+ trace(safePhase+'_request','開始','要求を生成');
+ trace('id_token','開始','値は非表示');
+ try{await ensureFreshIdToken();}catch(error){trace('id_token','失敗',error&&error.code==='TOKEN_EXPIRED_RECOVERY_FAILED'?'期限切れ復旧失敗':'取得または検証に失敗');throw error;}
+ trace('id_token','成功','取得済み・値は非表示');
+ diagnostic('start','開始');diagnostic('fetch','実行中');diagnostic('http','未取得');diagnostic('json','未実行');diagnostic('gas','未判定');
+ const body=new URLSearchParams({id_token:token,...fields}),controller=new AbortController();trace(safePhase+'_request','成功','送信データを生成');const timer=setTimeout(()=>controller.abort(),REQUEST_TIMEOUT_MS);
+ try{
+  let r;trace(safePhase+'_post','開始','POST');try{r=await fetch(GAS_URL,{method:'POST',body,redirect:'follow',referrerPolicy:'no-referrer',signal:controller.signal});diagnostic('fetch','成功');trace(safePhase+'_post','成功','fetch完了');trace('http_response','成功','HTTP '+r.status+' / redirect '+(r.redirected?'あり':'なし'));}catch(err){diagnostic('fetch','失敗');trace(safePhase+'_post','失敗','通信応答なし');trace('server_trace','スキップ','サーバー未到達または応答なし');clientDiagnostic('CLIENT_TRANSPORT_ERROR',safePhase+'-fetch');throw err;}
+  diagnostic('http',String(r.status));
+  if(!r.ok){diagnostic('gas','未判定');trace('http_response','失敗','HTTP '+r.status);trace('server_trace','スキップ','HTTP error response');clientDiagnostic('CLIENT_HTTP_ERROR',safePhase+'-http');throw Error('通信結果を確認できません。');}
+  let result;trace('response_body','開始','本文を解析');try{result=await r.json();diagnostic('json','成功');trace('response_body','成功','JSON本文を取得');}catch(err){diagnostic('json','失敗');trace('response_body','失敗','JSON本文を取得できません');trace('server_trace','スキップ','応答本文なし');clientDiagnostic('CLIENT_RESPONSE_PARSE_ERROR',safePhase+'-response');throw err;}
+  if(!result||typeof result!=='object'||Array.isArray(result)){diagnostic('json','失敗');trace('api_result','失敗','response shape invalid');trace('server_trace','スキップ','trace unavailable');clientDiagnostic('CLIENT_RESPONSE_PARSE_ERROR',safePhase+'-response');throw Error('通信結果を確認できません。');}
+  if(!result.ok){const safeCode=typeof result.code==='string'&&Object.prototype.hasOwnProperty.call(messages,result.code)?result.code:'OTHER';diagnostic('gas','失敗（'+safeCode+'）');trace('api_result','失敗','code '+safeCode);if(diagnosticEnabled&&Array.isArray(result.trace))for(const item of result.trace){if(item&&/^[a-z0-9_-]{1,48}$/.test(item.stage||'')&&['開始','成功','失敗','スキップ','情報'].includes(item.state))trace('gas_'+item.stage,item.state,'server +'+(Number.isFinite(item.ms)?item.ms:'?')+'ms');}else trace('server_trace','スキップ','応答にサーバートレースなし');if(result.code==='AUTHENTICATION_FAILED'&&AUTH_FAILURE_DIAGNOSTIC_CODES.has(result.diagnosticCode)){trace('auth_verify','失敗','code '+result.diagnosticCode+(result.diagnosticCode==='VERIFY_HTTP_ERROR'&&Number.isInteger(result.httpStatus)&&result.httpStatus>=100&&result.httpStatus<=599?' / HTTP '+result.httpStatus:''));}clientDiagnostic('CLIENT_SERVER_REJECTED',safePhase+'-application');const e=Error(messages[result.code]||'処理できませんでした。');e.code=result.code;e.result=result;if(result.code==='AUTHENTICATION_FAILED'&&AUTH_FAILURE_DIAGNOSTIC_CODES.has(result.diagnosticCode)){e.diagnosticCode=result.diagnosticCode;if(result.diagnosticCode==='VERIFY_HTTP_ERROR'&&Number.isInteger(result.httpStatus)&&result.httpStatus>=100&&result.httpStatus<=599)e.httpStatus=result.httpStatus;if(result.verifyRequest&&typeof result.verifyRequest==='object')e.verifyRequest=result.verifyRequest;}throw e;}
+  diagnostic('gas','成功（ok=true）');
+  trace('api_result','成功','ok=true');if(diagnosticEnabled&&Array.isArray(result.trace))for(const item of result.trace){if(item&&/^[a-z0-9_-]{1,48}$/.test(item.stage||'')&&['開始','成功','失敗','スキップ','情報'].includes(item.state))trace('gas_'+item.stage,item.state,'server +'+(Number.isFinite(item.ms)?item.ms:'?')+'ms');}else trace('server_trace','スキップ','応答にサーバートレースなし');
+  return result;
+ }finally{clearTimeout(timer);}
+}
+function showConnectionError(message=LOAD_ERROR,code='',diagnosticCode='',httpStatus=null,verifyRequest=null){attendancePanel.hidden=false;attendancePanel.classList.add('connection-error');connectionError.hidden=false;diagnosticPanel.hidden=!diagnosticEnabled;if(code&&/^[A-Z0-9_]{1,64}$/.test(code))trace('error_code','失敗','code '+code);if(diagnosticCode&&AUTH_FAILURE_DIAGNOSTIC_CODES.has(diagnosticCode))trace('auth_verify','失敗','code '+diagnosticCode+(diagnosticCode==='VERIFY_HTTP_ERROR'&&Number.isInteger(httpStatus)&&httpStatus>=100&&httpStatus<=599?' / HTTP '+httpStatus:''));trace('error_screen','情報','接続エラー画面を表示');const authFailed=code==='AUTHENTICATION_FAILED',recoveryFailed=code==='TOKEN_EXPIRED_RECOVERY_FAILED';const safeDiagnostic=AUTH_FAILURE_DIAGNOSTIC_CODES.has(diagnosticCode);const safeHttpStatus=Number.isInteger(httpStatus)&&httpStatus>=100&&httpStatus<=599;connectionErrorHeading.textContent=recoveryFailed?'認証を復旧できませんでした':authFailed?'認証できませんでした':'通信エラーが発生しました。';connectionErrorMessage.textContent=recoveryFailed?message:authFailed?'LINEアカウントの認証を確認できませんでした。\n\nLINEアプリから開き直してください。':message;authErrorCode.hidden=!authFailed&&!recoveryFailed;authDiagnosticCode.hidden=!authFailed||!diagnosticEnabled||!safeDiagnostic;authDiagnosticCode.textContent=authDiagnosticCode.hidden?'':'診断コード：'+diagnosticCode;authHttpStatus.hidden=!authFailed||!diagnosticEnabled||diagnosticCode!=='VERIFY_HTTP_ERROR'||!safeHttpStatus;authHttpStatus.textContent=authHttpStatus.hidden?'':'HTTPステータス：'+httpStatus;authDetails.hidden=(!authFailed&&!recoveryFailed)||!diagnosticEnabled;renderAuthDetails(verifyRequest);list.replaceChildren();status.textContent='';}
+function renderAuthDetails(verifyRequest){
+ const d=clientTokenDiagnostic||{};
+ authTokenReason.textContent=d.reason||'未確認';
+ authExpiredSeconds.textContent=Number.isSafeInteger(d.expiredSeconds)?String(d.expiredSeconds)+'秒':'該当なし';
+ const values={authTokenPresent:d.tokenPresent,authAudMatches:d.audMatches,authIssMatches:d.issMatches,authExpValid:d.expValid,authSubPresent:d.subPresent,authIatValid:d.iatValid};
+ const keys=['urlOk','methodOk','contentTypeOk'];keys.forEach(k=>values['verify'+k[0].toUpperCase()+k.slice(1)]=verifyRequest&&typeof verifyRequest[k]==='boolean'?verifyRequest[k]:null);
+ values.verifyIdTokenOk=verifyRequest&&typeof verifyRequest.idTokenPresent==='boolean'&&typeof verifyRequest.idTokenTypeOk==='boolean'?verifyRequest.idTokenPresent&&verifyRequest.idTokenTypeOk:null;
+ values.verifyClientIdOk=verifyRequest&&typeof verifyRequest.clientIdPresent==='boolean'&&typeof verifyRequest.clientIdTypeOk==='boolean'?verifyRequest.clientIdPresent&&verifyRequest.clientIdTypeOk:null;
+ values.verifyClientIdMatches=verifyRequest&&typeof verifyRequest.clientIdMatchesConfiguredChannel==='boolean'?verifyRequest.clientIdMatchesConfiguredChannel:null;
+ values.verifyConfiguredChannelMatches=verifyRequest&&typeof verifyRequest.configuredChannelMatchesExpected==='boolean'?verifyRequest.configuredChannelMatchesExpected:null;
+ for(const [id,value] of Object.entries(values)){const node=document.getElementById(id);if(node)node.textContent=value===true?'OK':value===false?'NG':'未確認';}
+}
+function clearConnectionError(){attendancePanel.classList.remove('connection-error');connectionError.hidden=true;diagnosticPanel.hidden=true;}
+function validTime(value){return typeof value==='string'&&/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(value);}
+function dateClassFor(selectedDate){const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Tokyo',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());const today=parts.filter(part=>part.type!=='literal').map(part=>part.value).join('-');return selectedDate===today?'today':selectedDate<today?'past':'future';}
+function scheduleTime(value){if(typeof value==='number'){if(!Number.isFinite(value)||value<0||value>=24)throw Error('schedule time');const minutes=Math.round(value*60);if(Math.abs(value*60-minutes)>1e-8)throw Error('schedule time');return String(Math.floor(minutes/60)).padStart(2,'0')+':'+String(minutes%60).padStart(2,'0');}if(validTime(value))return value;throw Error('schedule time');}
 function rangeText(start,end,next){return start+'–'+end+(next?'（翌日）':'');}
-function render(records){
- list.replaceChildren();
- if(!records.length){list.textContent='この日の勤務予定はありません。';return;}
- for(const row of records){
-  const card=document.createElement('article');
-  const title=document.createElement('h2');title.textContent=row.displayName;card.appendChild(title);
-  const date=document.createElement('p');date.textContent='勤務日: '+row.workDate;card.appendChild(date);
-  const planned=document.createElement('p');planned.className='times';planned.textContent='予定: '+rangeText(row.plannedStart,row.plannedEnd,row.plannedEndNextDay);card.appendChild(planned);
-  const form=document.createElement('form');
-  const fields=[];
-  for(const [caption,value] of [['実績開始',row.actualStart],['実績終了',row.actualEnd]]){
-   const label=document.createElement('label');label.append(document.createTextNode(caption+' '));
-   const input=document.createElement('input');input.type='time';input.required=true;input.value=value;label.appendChild(input);form.appendChild(label);fields.push(input);
-  }
-  if(row.saved){const saved=document.createElement('p');saved.className='muted';saved.textContent='保存済み・変更履歴 '+row.revision+' 件';card.appendChild(saved);}
-  const button=document.createElement('button');button.textContent='実績を勤怠表へ保存';form.appendChild(button);
-  form.addEventListener('submit',async e=>{
-   e.preventDefault();if(busy)return;busy=true;button.disabled=true;workDateInput.disabled=true;retry.disabled=true;
-   const saveDate=workDateInput.value;
-   setLoading(true,'勤怠情報を保存しています…');
-   try{await api({action:'saveActual',employeeId:row.employeeId,workDate:saveDate,actualStart:fields[0].value,actualEnd:fields[1].value,revision:String(row.revision)});const refreshed=await load(false,true);status.textContent=refreshed?'実績を保存し、勤怠表と変更履歴を再取得しました。':'実績は保存されましたが、画面の再取得に失敗しました。再保存せず、勤怠表を確認してください。';}
-   catch(err){const refreshed=await load(false,true);const saved=refreshed&&refreshed.records.some(x=>x.employeeId===row.employeeId&&x.saved&&x.revision>row.revision&&x.actualStart===fields[0].value&&x.actualEnd===fields[1].value);if(saved){clearConnectionError();status.textContent='保存済みであることを再取得で確認しました。';}else if(err.code==='SAVE_FAILED'){clearConnectionError();status.textContent=err.message;}else{showConnectionError(SAVE_UNKNOWN_ERROR);}}
-   finally{busy=false;button.disabled=false;workDateInput.disabled=false;retry.disabled=false;}
-  });
-  card.appendChild(form);list.appendChild(card);
+function applyWriteMode(){
+ const timesValid=validTime(startTimeInput.value)&&validTime(endTimeInput.value)&&startTimeInput.value!==endTimeInput.value;
+ const attendanceRequired=dateClass!=='future';
+ const canSave=shiftWritesEnabled&&(!attendanceRequired||attendanceWritesEnabled);
+ startTimeInput.disabled=!shiftWritesEnabled||busy;endTimeInput.disabled=!shiftWritesEnabled||busy;
+ saveButton.disabled=busy||!canSave||!timesValid;
+ deleteButton.disabled=busy||!entryState||(!entryState.schedule&&!entryState.attendance)||!shiftWritesEnabled|| (!!entryState.attendance&&!attendanceWritesEnabled);
+ for(const card of list.querySelectorAll('[data-manager-card]')){
+  const start=card.querySelector('[data-manager-start]'),end=card.querySelector('[data-manager-end]'),save=card.querySelector('[data-manager-save]'),remove=card.querySelector('[data-manager-delete]');
+  if(!start||!end||!save||!remove)continue;
+  const valid=validTime(start.value)&&validTime(end.value)&&start.value!==end.value;
+  start.disabled=!shiftWritesEnabled||busy;end.disabled=!shiftWritesEnabled||busy;
+  save.disabled=busy||!shiftWritesEnabled||(dateClass!=='future'&&!attendanceWritesEnabled)||!valid;
+  remove.disabled=busy||!shiftWritesEnabled||(card.dataset.hasValues!=='true')||(card.dataset.hasAttendance==='true'&&!attendanceWritesEnabled);
  }
 }
-async function load(show=true,preserveOnError=false){
- const sequence=++requestSequence;
- const selectedDate=workDateInput.value;
+function normalizeSchedule(value){if(value===null||typeof value==='undefined')return null;if(!value)throw Error('schedule format');const startTime=value.startTime===''||value.startTime===null||typeof value.startTime==='undefined'?'':scheduleTime(value.startTime),endTime=value.endTime===''||value.endTime===null||typeof value.endTime==='undefined'?'':scheduleTime(value.endTime);if(startTime&&endTime&&startTime===endTime)throw Error('schedule format');if(!startTime&&!endTime)return null;return {startTime,endTime};}
+function normalizeAttendance(value){if(value===null||typeof value==='undefined')return null;if(!value||!validTime(value.startTime)||!validTime(value.endTime)||value.startTime===value.endTime)throw Error('attendance format');return {startTime:value.startTime,endTime:value.endTime};}
+function renderManagerRecords(records){
+ list.replaceChildren();if(!records.length){list.textContent='この日の勤務予定はありません。';return;}
+ for(const row of records){
+  const schedule=normalizeSchedule(row.schedule),attendance=normalizeAttendance(row.attendance),selected=attendance||schedule;
+  const card=document.createElement('article'),title=document.createElement('h2'),date=document.createElement('p'),planned=document.createElement('p'),actual=document.createElement('p'),form=document.createElement('div'),actions=document.createElement('div'),saveAction=document.createElement('div'),deleteAction=document.createElement('div');
+  card.dataset.managerCard='true';card.dataset.hasValues=String(!!(schedule||attendance));card.dataset.hasAttendance=String(!!attendance);
+  title.textContent=row.displayName;date.textContent='勤務日: '+row.workDate;planned.className='times';planned.textContent='予定: '+(schedule&&schedule.startTime&&schedule.endTime?rangeText(scheduleTime(schedule.startTime),scheduleTime(schedule.endTime),row.plannedEndNextDay):'未登録');actual.textContent='開始・終了: '+(attendance?rangeText(attendance.startTime,attendance.endTime,row.actualEndNextDay):'未登録');
+  form.className='manager-entry-form';actions.className='entry-actions';saveAction.className='save-action';deleteAction.className='delete-action';
+  const startLabel=document.createElement('label'),start=document.createElement('input'),endLabel=document.createElement('label'),end=document.createElement('input'),save=document.createElement('button'),remove=document.createElement('button');
+  start.type='time';start.value=selected?selected.startTime:'';start.dataset.managerStart='true';startLabel.append('開始',start);
+  end.type='time';end.value=selected?selected.endTime:'';end.dataset.managerEnd='true';endLabel.append('終了',end);
+  save.type='button';save.textContent='保存';save.dataset.managerSave='true';remove.type='button';remove.textContent='削除';remove.dataset.managerDelete='true';saveAction.appendChild(save);deleteAction.appendChild(remove);
+  actions.append(saveAction,deleteAction);form.append(startLabel,endLabel,actions);card.append(title,date,planned,actual,form);list.appendChild(card);
+  if(selectedManagerEmployeeId===row.targetActorId)entryState=managerEntryState(row);
+  const prepare=()=>{entryState=managerEntryState(row);selectedManagerEmployeeId=row.targetActorId;startTimeInput.value=start.value;endTimeInput.value=end.value;};
+  start.addEventListener('input',applyWriteMode);end.addEventListener('input',applyWriteMode);
+  save.addEventListener('click',async()=>{prepare();await mutateEntry('save');});
+  remove.addEventListener('click',async()=>{prepare();await mutateEntry('delete');});
+ }
+ applyWriteMode();
+}
+function managerEntryState(row){
+ if(typeof row.targetActorId!=='string'||!row.targetActorId||typeof row.displayName!=='string'||!Number.isSafeInteger(row.revision)||row.revision<0||typeof row.stateToken!=='string'||!/^[a-f0-9]{64}$/.test(row.stateToken))throw Error('manager entry identity');
+ return {employeeId:row.targetActorId,attendanceEmployeeId:row.attendanceEmployeeId||'',displayName:row.displayName,revision:row.revision,stateToken:row.stateToken,schedule:normalizeSchedule(row.schedule),attendance:normalizeAttendance(row.attendance),attendanceRevision:Number.isSafeInteger(row.attendanceRevision)?row.attendanceRevision:0};
+}
+function render(data){
+ list.replaceChildren();entryState=null;dateClass=data.dateClass;managerCreateSection.hidden=data.actorRole!=='manager';
+ monthSheetsMessage.hidden=true;monthSheetsMessage.textContent='';entryCard.hidden=true;
+ if(data.monthSheetsMissing){monthSheetsMessage.textContent='対象月のシフト表または勤怠表がありません。';monthSheetsMessage.hidden=false;applyWriteMode();return;}
+ if(data.actorRole==='employee'&&data.selfShift){
+  const value=data.selfShift;if(typeof value.employeeId!=='string'||!value.employeeId||typeof value.displayName!=='string'||!value.displayName.trim()||!Number.isSafeInteger(value.revision)||value.revision<0||typeof value.stateToken!=='string'||!/^[a-f0-9]{64}$/.test(value.stateToken))throw Error('self entry identity');
+  const schedule=normalizeSchedule(value.schedule),attendance=normalizeAttendance(value.attendance);if(!['today','past','future'].includes(dateClass))throw Error('date class');
+  entryState={employeeId:value.employeeId,attendanceEmployeeId:value.attendanceEmployeeId||'',displayName:value.displayName,revision:value.revision,stateToken:value.stateToken,schedule,attendance,attendanceRevision:Number.isSafeInteger(value.attendanceRevision)?value.attendanceRevision:0};
+  employeeName.textContent=entryState.displayName;plannedTime.textContent=schedule?'予定: '+(schedule.startTime||'未入力')+'–'+(schedule.endTime||'未入力')+(schedule.startTime&&schedule.endTime&&schedule.endTime<schedule.startTime?'（翌日）':''):'シフト予定は未登録です。';
+  startTimeInput.value=attendance?attendance.startTime:(schedule?schedule.startTime:'');endTimeInput.value=attendance?attendance.endTime:(schedule?schedule.endTime:'');entryCard.hidden=false;applyWriteMode();return;
+ }
+ entryCard.hidden=true;renderManagerRecords(Array.isArray(data.records)?data.records:[]);
+}
+function entryOutcomeMatches(data,type,previous,expectedWorkDate,startTime,endTime){
+ if(!data||data.workDate!==expectedWorkDate)return false;
+ let value;
+ if(data.actorRole==='manager')value=Array.isArray(data.records)?data.records.find(row=>row&&row.targetActorId===previous.employeeId):null;
+ else if(data.actorRole==='employee')value=data.selfShift;
+ if(!value)return false;
+ const schedule=value.schedule||null,attendance=value.attendance||null;
+ if(type==='delete')return schedule===null&&attendance===null&&value.revision===previous.revision+1;
+ const expectedRevision=!previous.schedule&&previous.revision===0?0:previous.revision+1;
+ if(!schedule||schedule.startTime!==startTime||schedule.endTime!==endTime||value.revision!==expectedRevision)return false;
+ if(data.dateClass==='future'){const old=previous.attendance;return (old===null&&attendance===null)||(old&&attendance&&old.startTime===attendance.startTime&&old.endTime===attendance.endTime);}
+ return !!attendance&&attendance.startTime===startTime&&attendance.endTime===endTime;
+}
+async function mutateEntry(type){
+ const current=entryState;if(!current||busy)return;if(!shiftWritesEnabled){clearConnectionError();status.textContent=messages.DISABLED;return;}
+ if(type==='delete'){
+  if(!current.schedule&&!current.attendance)return;
+  if(current.attendance&&!attendanceWritesEnabled){status.textContent=messages.DISABLED;return;}
+  const targets=[current.schedule?'シフト表':'',current.attendance?'勤怠実績':''].filter(Boolean).join('・');
+  if(!window.confirm(workDateInput.value+'の'+targets+'を削除します。削除してよろしいですか？'))return;
+ }
+ if(type==='save'){if(!validTime(startTimeInput.value)||!validTime(endTimeInput.value)||startTimeInput.value===endTimeInput.value){status.textContent=messages.INVALID_REQUEST;return;}if(dateClass!=='future'&&!attendanceWritesEnabled){status.textContent=messages.DISABLED;return;}}
+ else if(type!=='delete'&&!current.schedule&&!current.attendance)return;
+ let requestId;try{if(typeof crypto==='undefined'||typeof crypto.randomUUID!=='function')throw Error('安全な処理IDを生成できません。');requestId=crypto.randomUUID();}catch(err){status.textContent=err.message;return;}
+ const saveDate=workDateInput.value,startTime=type==='delete'?'':startTimeInput.value,endTime=type==='delete'?'':endTimeInput.value;
+ busy=true;workDateInput.disabled=true;retry.disabled=true;applyWriteMode();setLoading(true,type==='delete'?'勤務情報を削除しています…':'勤務情報を保存しています…');let failure=null,successMessage='';
+ try{
+  const sendMutation=async(state,id)=>api({action:'shiftMutation',type:type==='delete'?'delete':(state.schedule?'update':'create'),requestId:id,employeeId:state.employeeId,workDate:saveDate,expectedRevision:String(state.revision),expectedStateToken:state.stateToken,startTime,endTime},'mutation');
+  let verificationState=current;
+  try{await sendMutation(current,requestId);}catch(err){failure=err;}
+  if(type==='save'&&failure&&failure.code==='CONFLICT'){
+   let latest=null;try{latest=await load(false,'readback');}catch(_){/* Keep the conflict and do not retry without fresh state. */}
+   if(latest&&entryState&&workDateInput.value===saveDate&&shiftWritesEnabled&&(dateClass==='future'||attendanceWritesEnabled)){
+    verificationState=entryState;startTimeInput.value=startTime;endTimeInput.value=endTime;applyWriteMode();
+    try{await sendMutation(verificationState,crypto.randomUUID());failure=null;}catch(err){failure=err;}
+   }
+  }
+  if(failure&&['AUTH_RECOVERY_NAVIGATING','TOKEN_EXPIRED_RECOVERY_FAILED','AUTHENTICATION_FAILED'].includes(failure.code)){
+   if(failure.code!=='AUTH_RECOVERY_NAVIGATING')showConnectionError(failure.code==='TOKEN_EXPIRED_RECOVERY_FAILED'?failure.message:messages.AUTHENTICATION_FAILED,failure.code);
+   return;
+  }
+  let refreshed=null;try{refreshed=await load(false,'readback');}catch(_){/* Mutation result remains unknown; never retry a write automatically. */}
+  if(refreshed&&entryOutcomeMatches(refreshed,type,verificationState,saveDate,startTime,endTime)){clearConnectionError();successMessage=type==='delete'?'シフト表・勤怠実績の削除結果を再取得で確認しました。':'保存結果をシフト表・勤怠表の再取得で確認しました。';}
+  else if(refreshed&&failure&&failure.code&&failure.code!=='OUTCOME_UNKNOWN'&&failure.code!=='ROLLBACK_FAILED'&&failure.code!=='UNAVAILABLE'){clearConnectionError();status.textContent=failure.message||messages[failure.code]||'処理できませんでした。';}
+  else{const unknown=type==='delete'?DELETE_UNKNOWN_ERROR:SAVE_UNKNOWN_ERROR;showConnectionError(unknown);}
+  if(refreshed&&failure&&failure.code==='CONFLICT'){startTimeInput.value=startTime;endTimeInput.value=endTime;applyWriteMode();status.textContent=messages.CONFLICT;}
+ }catch(_){
+  const unknown=type==='delete'?DELETE_UNKNOWN_ERROR:SAVE_UNKNOWN_ERROR;
+  showConnectionError(unknown);
+ }finally{
+  busy=false;workDateInput.disabled=false;retry.disabled=false;applyWriteMode();setLoading(false);
+  if(successMessage)status.textContent=successMessage;
+ }
+}
+async function load(show=true,diagnosticPhase='attendance'){
+ trace('initial_data','開始','勤怠データ処理');
+ const sequence=++requestSequence,selectedDate=workDateInput.value;
+ let processingStage='API応答待ち';
+ diagnostic('processing','API応答待ち');
+ shiftWritesEnabled=false;attendanceWritesEnabled=false;applyWriteMode();
+ monthSheetsMessage.hidden=true;monthSheetsMessage.textContent='';
  if(!selectedDate||selectedDate<BASE_DATE){status.textContent='勤怠日は2026-10-01以降を選択してください。';retry.hidden=true;return null;}
  retry.disabled=false;clearConnectionError();status.textContent='';setLoading(true,'勤怠情報を読み込んでいます…');
  try{
-  const data=await api({action:'attendanceList',workDate:selectedDate});
+  const data=await api({action:'attendanceList',workDate:selectedDate},diagnosticPhase);
+  processingStage='応答後の要求状態確認';diagnostic('processing',processingStage);
   if(sequence!==requestSequence||selectedDate!==workDateInput.value)return null;
-  enrollmentPanel.hidden=true;attendancePanel.hidden=false;render(data.records);
-  if(show)status.textContent=data.records.length?data.records.length+'名分の勤務予定・実績を表示しています。':'';
+  processingStage='応答の日付・区分確認';diagnostic('processing',processingStage);
+  if(data.workDate!==selectedDate)throw Error('勤怠日の応答を確認できません。');if(Object.prototype.hasOwnProperty.call(data,'dateClass')){if(!['today','past','future'].includes(data.dateClass))throw Error('勤怠日の応答を確認できません。');}else data.dateClass=dateClassFor(selectedDate);
+  processingStage='更新権限の反映';diagnostic('processing',processingStage);
+  const legacyWrites=data.writesEnabled===true;
+  shiftWritesEnabled=typeof data.shiftWritesEnabled==='boolean'?data.shiftWritesEnabled:legacyWrites;
+  attendanceWritesEnabled=typeof data.attendanceWritesEnabled==='boolean'?data.attendanceWritesEnabled:legacyWrites;
+  processingStage='画面パネルの切替';diagnostic('processing',processingStage);
+  enrollmentPanel.hidden=true;attendancePanel.hidden=false;processingStage='描画呼び出し';diagnostic('processing',processingStage);diagnostic('render','実行中');try{render(data);diagnostic('render','成功');}catch(renderError){diagnostic('render','失敗');const safeErrorType=['Error','TypeError','RangeError','ReferenceError','SyntaxError','URIError','EvalError'].includes(renderError&&renderError.name)?renderError.name:'Other';trace('render_error','情報','type '+safeErrorType);throw renderError;}processingStage='描画後の操作状態更新';diagnostic('processing',processingStage);applyWriteMode();
+  processingStage='画面メッセージ更新';diagnostic('processing',processingStage);
+  if(show&&!status.textContent)status.textContent=data.monthSheetsMissing?'':(!shiftWritesEnabled?'勤務情報の更新は停止中です。':(data.actorRole==='manager'?(data.records.length?data.records.length+'名分の勤務情報を表示しています。':''):''));
+  diagnostic('processing','完了');trace('initial_data','成功','処理完了');trace('render_complete','成功','画面更新完了');
   return data;
  }catch(e){
   if(sequence!==requestSequence||selectedDate!==workDateInput.value)return null;
+  diagnostic('processing','失敗（'+processingStage+'）');trace('initial_data','失敗',processingStage);
+  if(e.code==='AUTH_RECOVERY_NAVIGATING')return null;
+  if(e.code==='DISABLED'){attendancePanel.hidden=false;enrollmentPanel.hidden=true;entryState=null;entryCard.hidden=true;list.replaceChildren();shiftWritesEnabled=false;attendanceWritesEnabled=false;dateClass='invalid';clearConnectionError();status.textContent=e.message;return null;}
   if(e.code==='AUTHORIZATION_DENIED'){list.replaceChildren();attendancePanel.hidden=true;enrollmentPanel.hidden=false;enrollmentStatus.textContent='';retry.hidden=true;return null;}
-  list.replaceChildren();
-  showConnectionError(LOAD_ERROR);
-  return null;
+  list.replaceChildren();showConnectionError(e.code==='AUTHENTICATION_FAILED'?messages.AUTHENTICATION_FAILED:e.code==='TOKEN_EXPIRED_RECOVERY_FAILED'?e.message:LOAD_ERROR,e.code,e.diagnosticCode,e.httpStatus,e.verifyRequest);return null;
  }finally{if(sequence===requestSequence)setLoading(false);}
 }
 document.getElementById('enrollment').addEventListener('submit',async e=>{
@@ -121,35 +354,75 @@ document.getElementById('enrollment').addEventListener('submit',async e=>{
  button.disabled=true;input.disabled=true;enrollmentStatus.textContent='';
  setLoading(true,'利用登録を確認しています…');
  try{
-  await api({action:'register',registrationCode:input.value.trim()});
+  await api({action:'register',registrationCode:input.value.trim()},'registration');
   input.value='';enrollmentPanel.hidden=true;attendancePanel.hidden=false;
   setLoading(true,'勤怠情報を読み込んでいます…');
   await load();
- }catch(err){enrollmentStatus.textContent=(err.message||'利用登録を確認できませんでした。')+' 登録結果が不明な場合は管理者に確認してください。';}
+ }catch(err){if(err.code==='TOKEN_EXPIRED_RECOVERY_FAILED')showConnectionError(err.message,err.code);else if(err.code!=='AUTH_RECOVERY_NAVIGATING')enrollmentStatus.textContent=err.code==='DISABLED'?err.message:(err.message||'利用登録を確認できませんでした。')+' 登録結果が不明な場合は管理者に確認してください。';}
  finally{setLoading(false);busy=false;button.disabled=false;input.disabled=false;}
 });
-document.getElementById('retry').addEventListener('click',()=>{if(busy)return;if(liffReady)load();else start();});
-workDateInput.addEventListener('change',()=>{if(!busy)load();});
+document.getElementById('retry').addEventListener('click',()=>{if(busy)return;if(authRecoveryExhausted){try{const storage=sessionStore();if(storage)storage.removeItem(AUTH_RECOVERY_SESSION_KEY);}catch(_){}authRecoveryExhausted=false;}if(liffReady)load();else start();});
+workDateInput.addEventListener('change',()=>{workDateInput.blur();if(!busy)load();});
+managerCreateButton.addEventListener('click',async()=>{
+ if(busy)return;
+ managerCreateError.hidden=true;managerCreateError.textContent='';
+ const month=managerCreateMonth.value;
+ if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)){managerCreateError.textContent='作成する年月を選択してください。';managerCreateError.hidden=false;return;}
+ busy=true;managerCreateButton.disabled=true;managerCreateMonth.disabled=true;setLoading(true,'月次シートを作成しています…');
+ try{
+  await api({action:'createMonthlySheets',month},'monthly');
+  const successMessage=month.replace('-','年')+'月のシフト表・勤怠表を作成しました。';
+  if(month===workDateInput.value.slice(0,7)){
+   const refreshed=await load(false);
+   if(refreshed)status.textContent=successMessage;
+  }else status.textContent=successMessage;
+ }catch(error){
+  const result=error&&error.result;
+  if(result&&result.shift&&result.attendance){
+   const label=value=>value.created?'作成済み':value.reason==='EXISTS'?'同名の既存シートがあるため未作成':value.reason==='CLEANUP_FAILED'?'作成後の整理に失敗しました。シート状態を確認してください':'作成失敗';
+   managerCreateError.textContent='シフト表：'+label(result.shift)+'\n勤怠表：'+label(result.attendance)+'\n既存シートは変更していません。';
+  }else if(error&&error.code==='INVALID_REQUEST')managerCreateError.textContent='作成する年月を確認してください。';
+  else if(error&&error.code==='UNAVAILABLE')managerCreateError.textContent='月次シートの作成結果を確認できません。重複操作を避けるため、対象月のシート名を確認してください。';
+  else managerCreateError.textContent=error&&error.message?error.message:'月次シートを作成できませんでした。';
+  managerCreateError.hidden=false;
+ }finally{busy=false;managerCreateButton.disabled=false;managerCreateMonth.disabled=false;setLoading(false);applyWriteMode();}
+});
+entryForm.addEventListener('submit',async event=>{event.preventDefault();await mutateEntry('save');});
+deleteButton.addEventListener('click',()=>mutateEntry('delete'));
+startTimeInput.addEventListener('input',applyWriteMode);endTimeInput.addEventListener('input',applyWriteMode);
 async function initializeLiff(){
+ trace('liff_init','開始','LIFF SDK初期化');
  if(!liffInitPromise){
   const pending=Promise.resolve().then(()=>liff.init({liffId:LIFF_ID}));
   liffInitPromise=pending;
   pending.catch(()=>{if(liffInitPromise===pending)liffInitPromise=null;});
  }
- await withTimeout(liffInitPromise,LIFF_INIT_TIMEOUT_MS,'LINE接続がタイムアウトしました。');
+ try{await withTimeout(liffInitPromise,LIFF_INIT_TIMEOUT_MS,'LINE接続がタイムアウトしました。');trace('liff_init','成功','初期化完了');}catch(_){trace('liff_init','失敗','初期化失敗またはtimeout');throw _;}
 }
 async function start(){
  if(busy)return;busy=true;setLoading(true,'LINEに接続しています…');
+ trace('startup','開始','起動処理');
  try{
   await initializeLiff();
-  if(!liff.isLoggedIn()){liff.login();return;}
-  token=liff.getIDToken()||'';if(!token)throw Error('LINE本人確認情報を取得できません。');
+  const storage=sessionStore();let recoveryPending=false;try{recoveryPending=!!storage&&!!storage.getItem(AUTH_RECOVERY_SESSION_KEY);}catch(_){throw expiredRecoveryFailure();}
+  trace('login_state','開始','ログイン状態を確認');let loggedIn;try{loggedIn=liff.isLoggedIn();}catch(error){trace('login_state','失敗','状態確認に失敗');throw error;}if(!loggedIn){
+   trace('login_state','失敗','未ログイン');
+   if(recoveryPending)throw expiredRecoveryFailure();
+   liff.login();throw recoveryError('AUTH_RECOVERY_NAVIGATING','LINEのログイン画面へ移動しています…');
+  }
+  trace('login_state','成功','ログイン中');const tokenState=tokenSnapshot();trace('id_token','情報',tokenState.valid?'有効':'利用不可 '+tokenState.reason);
+  if(recoveryPending){
+   if(tokenState.valid){try{storage.removeItem(AUTH_RECOVERY_SESSION_KEY);}catch(_){}authRecoveryExhausted=false;}
+   else throw expiredRecoveryFailure();
+  }else if(!tokenState.valid){if(tokenState.reason==='TOKEN_EXPIRED')beginExpiredTokenRecovery();throw recoveryError('AUTHENTICATION_FAILED','LINE本人確認情報を取得できません。');}
   liffReady=true;
   await load();
- }catch(e){enrollmentPanel.hidden=true;showConnectionError(LOAD_ERROR);}
- finally{busy=false;setLoading(false);}
+ }catch(e){trace('startup','失敗',e.code==='AUTH_RECOVERY_NAVIGATING'?'認証画面へ移動':(e.code||'起動処理失敗'));if(e.code!=='AUTH_RECOVERY_NAVIGATING'){enrollmentPanel.hidden=true;showConnectionError(e.code==='AUTHENTICATION_FAILED'?messages.AUTHENTICATION_FAILED:e.code==='TOKEN_EXPIRED_RECOVERY_FAILED'?e.message:LOAD_ERROR,e.code,e.diagnosticCode,e.httpStatus,e.verifyRequest);}}
+ finally{busy=false;setLoading(false);applyWriteMode();}
 }
 start();
 </script>
 </body>
 </html>
+
+
