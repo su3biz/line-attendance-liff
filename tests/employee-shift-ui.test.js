@@ -10,7 +10,7 @@ const match = html.match(/<script>\s*([\s\S]*?)<\/script>/);
 assert.ok(match, 'inline LIFF script exists');
 
 function element() {
-  const node = {
+  return {
     value: '', textContent: '', type: '', required: false, disabled: false, hidden: false,
     children: [], handlers: {}, attributes: {}, dataset: {}, className: '', blurCount: 0, classList: { add() {}, remove() {} },
     addEventListener(name, handler) { this.handlers[name] = handler; },
@@ -20,11 +20,7 @@ function element() {
     append(...children) { this.children.push(...children); },
     replaceChildren(...children) { this.children = children; },
     setAttribute(name, value) { this.attributes[name] = value; },
-    insertAdjacentElement(_position, child) { this.nextElementSibling = child; return child; },
-    focus() { this.focused = true; },
   };
-  Object.defineProperty(node, 'value', { get() { return this._value || ''; }, set(value) { this._value = value; if (this.tagName === 'SELECT' && this.children.length > 1) this.selectedValue = value; } });
-  return node;
 }
 
 function makePage({ initialState, confirm = true, mutationFailure = null, responseWorkDate = null, dateClass = 'future', actorRole = 'employee', disabledActions = [], shiftWritesEnabled = true, attendanceWritesEnabled = true, attendanceRecords = [] } = {}) {
@@ -34,7 +30,7 @@ function makePage({ initialState, confirm = true, mutationFailure = null, respon
   const stored = new Map();
   let id = 0;
   const get = (name) => {
-    if (!elements.has(name)) { const node=element(); if(name==='startTime'||name==='endTime')node.type='hidden'; elements.set(name,node); }
+    if (!elements.has(name)) elements.set(name, element());
     return elements.get(name);
   };
   const nextState = { stateToken: 'a'.repeat(64), ...initialState };
@@ -43,7 +39,7 @@ function makePage({ initialState, confirm = true, mutationFailure = null, respon
   const context = vm.createContext({
     document: {
       getElementById: get,
-      createElement: (tagName) => { const node = element(); node.tagName = String(tagName).toUpperCase(); return node; },
+      createElement: element,
       createTextNode: (textContent) => ({ textContent }),
     },
     window: {
@@ -107,18 +103,6 @@ function makePage({ initialState, confirm = true, mutationFailure = null, respon
   return { context, get, requests, confirmMessages };
 }
 
-function employeePicker(page, id) { return page.get(id).nextElementSibling; }
-function selectPickerValue(wrapper, hourValue, minuteValue) {
-  const panel = wrapper.children[1];
-  const hour = panel.children[0].children[1], minute = panel.children[1].children[1];
-  hour.value = hourValue; hour.handlers.change();
-  minute.value = minuteValue; minute.handlers.change();
-}
-function setEmployeeTime(page, id, value) {
-  const [hour, minute] = value.split(':');
-  selectPickerValue(employeePicker(page, id), hour, minute);
-}
-
 test('selecting a date closes the shared calendar input and reloads that date for employee and manager views', () => {
   for (const actorRole of ['employee', 'manager']) {
     const page = makePage();
@@ -149,8 +133,8 @@ test('calendar month navigation has no date-change handler and does not close or
 test('employee can create a shift through the current entry form with the authenticated identity and revision', async () => {
   const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 2, schedule: null, attendance: null } });
   await page.context.load(false);
-  selectPickerValue(employeePicker(page, 'startTime'), '09', '00');
-  selectPickerValue(employeePicker(page, 'endTime'), '17', '00');
+  page.get('startTime').value = '09:00';
+  page.get('endTime').value = '17:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
   const request = page.requests.find((item) => item.action === 'shiftMutation');
   assert.deepEqual(request, {
@@ -165,8 +149,8 @@ test('employee can create a shift through the current entry form with the authen
 test('employee can save an initially empty day and the revision-zero create is confirmed by readback', async () => {
   const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
   await page.context.load(false);
-  selectPickerValue(employeePicker(page, 'startTime'), '09', '00');
-  selectPickerValue(employeePicker(page, 'endTime'), '17', '00');
+  page.get('startTime').value = '09:00';
+  page.get('endTime').value = '17:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
   assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
   assert.equal(vm.runInContext('entryState.revision', page.context), 0);
@@ -178,8 +162,8 @@ test('employee can save an initially empty day and the revision-zero create is c
 test('employee update uses the current schedule revision', async () => {
   const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 4, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null } });
   await page.context.load(false);
-  selectPickerValue(employeePicker(page, 'startTime'), '10', '00');
-  selectPickerValue(employeePicker(page, 'endTime'), '18', '00');
+  page.get('startTime').value = '10:00';
+  page.get('endTime').value = '18:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
   const request = page.requests.find((item) => item.action === 'shiftMutation');
   assert.equal(request.type, 'update');
@@ -195,7 +179,7 @@ test('a state-token conflict reloads current state and retries one save with a n
     initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 4, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null },
   });
   await page.context.load(false);
-  selectPickerValue(employeePicker(page, 'startTime'), '10', '00'); selectPickerValue(employeePicker(page, 'endTime'), '18', '00');
+  page.get('startTime').value = '10:00'; page.get('endTime').value = '18:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
   const mutations = page.requests.filter((item) => item.action === 'shiftMutation');
   assert.equal(mutations.length, 2);
@@ -219,44 +203,6 @@ test('startup clears the busy gate and applies current writer permissions to ini
   assert.equal(populated.get('endTime').value, '18:00');
   assert.equal(populated.get('saveButton').disabled, false);
   assert.equal(populated.get('deleteButton').disabled, false);
-});
-
-test('shared time picker offers exactly four quarter-hour minute choices for employee and manager fields', async () => {
-  const page = makePage({ attendanceRecords: [{ employeeId: 'EMP-02', targetActorId: 'EMP-02', displayName: '従業員02', revision: 1, stateToken: 'c'.repeat(64), schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null }] });
-  page.context.render({ actorRole: 'employee', dateClass: 'past', selfShift: { employeeId: 'EMP-01', displayName: '本人', revision: 0, stateToken: 'a'.repeat(64), schedule: null, attendance: null } });
-  const employeeStart = employeePicker(page, 'startTime');
-  assert.deepEqual(Array.from(vm.runInContext('TIME_MINUTE_OPTIONS', page.context)), ['00', '15', '30', '45']);
-  assert.deepEqual(employeeStart.children[1].children[1].children[1].children.map((option) => option.value), ['00', '15', '30', '45']);
-  assert.equal(employeeStart.children[0].type, 'button');
-  assert.equal(page.get('startTime').type, 'hidden');
-  const managerPage = makePage();
-  managerPage.context.render({ actorRole: 'manager', dateClass: 'future', records: [{ employeeId: 'EMP-02', targetActorId: 'EMP-02', displayName: '従業員02', revision: 1, stateToken: 'c'.repeat(64), schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null }] });
-  const card = managerPage.get('list').children[0];
-  assert.ok(card, 'manager record is rendered');
-  assert.match(match[1], /createTimePicker\(start,'開始 '\+row\.displayName\)[\s\S]*createTimePicker\(end,'終了 '\+row\.displayName\)/);
-  for (const field of [card.children[4].children[0].children[1], card.children[4].children[1].children[1]]) {
-    assert.deepEqual(field.nextElementSibling.children[1].children[1].children[1].children.map((option) => option.value), ['00', '15', '30', '45']);
-  }
-});
-
-test('manager can update both schedule endpoints using quarter-hour choices for the selected employee', async () => {
-  const row = { employeeId: 'EMP-02', targetActorId: 'EMP-02', displayName: '従業員02', workDate: '2026-10-05', revision: 2, stateToken: 'c'.repeat(64), schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null };
-  const page = makePage({ actorRole: 'manager', dateClass: 'future', attendanceRecords: [row] });
-  vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true', page.context);
-  page.context.render({ actorRole: 'manager', dateClass: 'future', records: [row] });
-  const card = page.get('list').children[0];
-  const form = card.children[4], start = form.children[0].children[1], end = form.children[1].children[1];
-  selectPickerValue(start.nextElementSibling, '09', '15');
-  selectPickerValue(end.nextElementSibling, '17', '45');
-  const save = form.children[2].children[0].children[0];
-  await save.handlers.click();
-  const request = page.requests.find((item) => item.action === 'shiftMutation');
-  assert.ok(request, `manager mutation request sent; status=${page.get('status').textContent}`);
-  assert.equal(request.employeeId, 'EMP-02');
-  assert.equal(request.type, 'update');
-  assert.equal(request.startTime, '09:15');
-  assert.equal(request.endTime, '17:45');
-  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.schedule', page.context))), { startTime: '09:15', endTime: '17:45' });
 });
 
 test('shift deletion asks for confirmation and sends no mutation when cancelled', async () => {
@@ -353,7 +299,7 @@ test('past and today saves update both records while future saves preserve actua
   for (const dateClass of ['past', 'today']) {
     const page = makePage({ dateClass, initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
     await page.context.load(false);
-    setEmployeeTime(page, 'startTime', '09:00'); setEmployeeTime(page, 'endTime', '17:00');
+    page.get('startTime').value = '09:00'; page.get('endTime').value = '17:00';
     await page.get('entryForm').handlers.submit({ preventDefault() {} });
     assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.schedule', page.context))), { startTime: '09:00', endTime: '17:00' });
     assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.attendance', page.context))), { startTime: '09:00', endTime: '17:00' });
@@ -363,36 +309,109 @@ test('past and today saves update both records while future saves preserve actua
   await future.context.load(false);
   assert.equal(future.get('startTime').value, priorAttendance.startTime, 'case 4 displays actual times');
   assert.equal(future.get('endTime').value, priorAttendance.endTime);
-  setEmployeeTime(future, 'startTime', '10:00'); setEmployeeTime(future, 'endTime', '18:00');
+  future.get('startTime').value = '10:00'; future.get('endTime').value = '18:00';
   await future.get('entryForm').handlers.submit({ preventDefault() {} });
   assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.schedule', future.context))), { startTime: '10:00', endTime: '18:00' });
   assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.attendance', future.context))), priorAttendance, 'future save leaves actual data unchanged');
 });
 
-test('saving unchanged non-quarter-hour values preserves original minutes and a one-sided edit preserves the other value', async () => {
+test('employee and manager inputs use native time controls with a 15-minute step', async () => {
+  const start = html.match(/<input id="startTime"[^>]*>/)?.[0] || '';
+  const end = html.match(/<input id="endTime"[^>]*>/)?.[0] || '';
+  for (const input of [start, end]) {
+    assert.match(input, /type="time"/);
+    assert.match(input, /step="900"/);
+  }
+  assert.match(match[1], /start\.type='time';start\.step='900'/);
+  assert.match(match[1], /end\.type='time';end\.step='900'/);
+  assert.doesNotMatch(html, /createTimePicker|time-picker|TIME_MINUTE_OPTIONS/);
+  assert.match(html, /<button id="saveButton" type="submit" formnovalidate>/);
+
+  const row = { employeeId: 'EMP-02', targetActorId: 'EMP-02', displayName: '従業員02', workDate: '2026-10-05', revision: 2, stateToken: 'c'.repeat(64), schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null };
+  const page = makePage({ actorRole: 'manager', dateClass: 'future', attendanceRecords: [row] });
+  vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true', page.context);
+  page.context.render({ actorRole: 'manager', dateClass: 'future', records: [row] });
+  const form = page.get('list').children[0].children[4];
+  const managerStart = form.children[0].children[1], managerEnd = form.children[1].children[1];
+  for (const input of [managerStart, managerEnd]) {
+    assert.equal(input.type, 'time');
+    assert.equal(input.step, '900');
+  }
+  managerStart.value = '09:15'; managerEnd.value = '17:45';
+  await form.children[2].children[0].children[0].handlers.click();
+  const request = page.requests.find((item) => item.action === 'shiftMutation');
+  assert.equal(request.employeeId, 'EMP-02');
+  assert.equal(request.startTime, '09:15');
+  assert.equal(request.endTime, '17:45');
+  assert.match(page.get('status').textContent, /再取得で確認しました/);
+});
+
+test('step constraint does not block preserving non-quarter-hour employee values', async () => {
   const page = makePage({ dateClass: 'past', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '08:55', endTime: '17:05' }, attendance: { startTime: '08:55', endTime: '17:05' } } });
   await page.context.load(false);
-  assert.equal(employeePicker(page, 'startTime').children[0].textContent, '08:55');
-  assert.equal(employeePicker(page, 'endTime').children[0].textContent, '17:05');
+  assert.equal(page.get('startTime').value, '08:55');
+  assert.equal(page.get('endTime').value, '17:05');
+  assert.equal(vm.runInContext("validTime('08:55') && validTime('17:05')", page.context), true);
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
   let request = page.requests.find((item) => item.action === 'shiftMutation');
   assert.equal(request.startTime, '08:55');
   assert.equal(request.endTime, '17:05');
+  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.schedule', page.context))), { startTime: '08:55', endTime: '17:05' });
 
-  const edited = makePage({ dateClass: 'past', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '08:55', endTime: '17:05' }, attendance: { startTime: '08:55', endTime: '17:05' } } });
-  await edited.context.load(false);
-  setEmployeeTime(edited, 'startTime', '09:15');
-  await edited.get('entryForm').handlers.submit({ preventDefault() {} });
-  request = edited.requests.find((item) => item.action === 'shiftMutation');
+  const oneSided = makePage({ dateClass: 'past', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '08:55', endTime: '17:05' }, attendance: { startTime: '08:55', endTime: '17:05' } } });
+  await oneSided.context.load(false);
+  oneSided.get('startTime').value = '09:15';
+  await oneSided.get('entryForm').handlers.submit({ preventDefault() {} });
+  request = oneSided.requests.find((item) => item.action === 'shiftMutation');
   assert.equal(request.startTime, '09:15');
   assert.equal(request.endTime, '17:05');
-  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.schedule', edited.context))), { startTime: '09:15', endTime: '17:05' });
+});
+
+test('manager standard time inputs retain the existing create and delete mutation behavior', async () => {
+  const empty = { employeeId: 'EMP-03', targetActorId: 'EMP-03', displayName: '従業員03', workDate: '2026-10-05', revision: 0, stateToken: 'd'.repeat(64), schedule: null, attendance: null };
+  const createPage = makePage({ actorRole: 'manager', dateClass: 'future', attendanceRecords: [empty] });
+  vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true', createPage.context);
+  createPage.context.render({ actorRole: 'manager', dateClass: 'future', records: [empty] });
+  let form = createPage.get('list').children[0].children[4];
+  form.children[0].children[1].value = '08:15'; form.children[1].children[1].value = '16:45';
+  await form.children[2].children[0].children[0].handlers.click();
+  let request = createPage.requests.find((item) => item.action === 'shiftMutation');
+  assert.equal(request.type, 'create');
+  assert.equal(request.employeeId, 'EMP-03');
+  assert.equal(request.startTime, '08:15');
+  assert.equal(request.endTime, '16:45');
+
+  const existing = { ...empty, revision: 3, schedule: { startTime: '08:15', endTime: '16:45' } };
+  const deletePage = makePage({ actorRole: 'manager', dateClass: 'future', attendanceRecords: [existing] });
+  vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true', deletePage.context);
+  deletePage.context.render({ actorRole: 'manager', dateClass: 'future', records: [existing] });
+  form = deletePage.get('list').children[0].children[4];
+  await form.children[2].children[1].children[0].handlers.click();
+  request = deletePage.requests.find((item) => item.action === 'shiftMutation');
+  assert.equal(request.type, 'delete');
+  assert.equal(request.employeeId, 'EMP-03');
+  assert.equal(request.startTime, '');
+  assert.equal(request.endTime, '');
+  assert.equal(vm.runInContext('entryState.schedule', deletePage.context), null);
+});
+
+test('overnight employee schedule continues to save and display with the next-day label', async () => {
+  const page = makePage({ dateClass: 'future', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '22:00', endTime: '02:00' }, attendance: null } });
+  await page.context.load(false);
+  assert.match(page.get('plannedTime').textContent, /22:00–02:00（翌日）/);
+  page.get('startTime').value = '22:15'; page.get('endTime').value = '02:45';
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
+  const request = page.requests.find((item) => item.action === 'shiftMutation');
+  assert.equal(request.startTime, '22:15');
+  assert.equal(request.endTime, '02:45');
+  assert.match(page.get('plannedTime').textContent, /22:15–02:45（翌日）/);
 });
 
 test('a lost mutation response is resolved by rereading state without resending', async () => {
   const page = makePage({ mutationFailure: 'after', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
   await page.context.load(false);
-  setEmployeeTime(page, 'startTime', '09:00'); setEmployeeTime(page, 'endTime', '17:00');
+  page.get('startTime').value = '09:00';
+  page.get('endTime').value = '17:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
   assert.match(page.get('status').textContent, /保存結果を.*再取得で確認しました/);
   assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
@@ -401,7 +420,8 @@ test('a lost mutation response is resolved by rereading state without resending'
 test('a mutation outcome is not confirmed from a different date selected during the request', async () => {
   const page = makePage({ mutationFailure: 'after-switch', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
   await page.context.load(false);
-  setEmployeeTime(page, 'startTime', '09:00'); setEmployeeTime(page, 'endTime', '17:00');
+  page.get('startTime').value = '09:00';
+  page.get('endTime').value = '17:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
   assert.doesNotMatch(page.get('status').textContent, /再取得で確認しました/);
   assert.match(page.get('connectionErrorMessage').textContent, /再保存せず/);
@@ -411,7 +431,8 @@ test('a mutation outcome is not confirmed from a different date selected during 
 test('an unresolved mutation is not retried and reports the uncertain result', async () => {
   const page = makePage({ mutationFailure: 'before', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
   await page.context.load(false);
-  setEmployeeTime(page, 'startTime', '09:00'); setEmployeeTime(page, 'endTime', '17:00');
+  page.get('startTime').value = '09:00';
+  page.get('endTime').value = '17:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
   assert.match(page.get('connectionErrorMessage').textContent, /再保存せず/);
   assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
@@ -437,7 +458,8 @@ test('DISABLED attendance response is shown as a stopped feature, not a connecti
 test('DISABLED shift mutation is shown distinctly and never resends the mutation', async () => {
   const page = makePage({ disabledActions: ['shiftMutation'], initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: null, attendance: null } });
   await page.context.load(false);
-  setEmployeeTime(page, 'startTime', '09:00'); setEmployeeTime(page, 'endTime', '17:00');
+  page.get('startTime').value = '09:00';
+  page.get('endTime').value = '17:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
   assert.equal(page.get('connectionError').hidden, true);
   assert.equal(page.get('status').textContent, '機能が停止中です。');
@@ -475,7 +497,7 @@ test('initial work date and current employee controls stay in the existing atten
   }
   assert.match(html, /class="entry-actions"[^>]*>[\s\S]*id="saveButton"[\s\S]*id="deleteButton"/);
   assert.match(html, /\.entry-actions\{[^}]*display:flex[^}]*gap:20px/);
-  assert.match(html, /<button id="saveButton" type="submit">保存<\/button>/);
+  assert.match(html, /<button id="saveButton" type="submit" formnovalidate>保存<\/button>/);
   assert.match(html, /<label>開始 /);
   assert.match(html, /<label>終了 /);
   assert.doesNotMatch(html, /id="shiftForm"/);
