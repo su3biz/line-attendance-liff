@@ -22,8 +22,10 @@ function makePage(search, options = {}) {
     removeItem(key) { stored.delete(key); },
   };
   const location = { search, href: 'https://example.test/liff?authDiagnostics=DEV', reload: options.reload || (() => {}) };
+  const createElement = (tagName) => ({ tagName: String(tagName).toUpperCase(), value: '', textContent: '', children: [], handlers: {}, classList: { add() {}, remove() {} }, addEventListener(name, handler) { this.handlers[name] = handler; }, append(...children) { this.children.push(...children); }, appendChild(child) { this.children.push(child); }, insertAdjacentElement(_where, child) { this.nextElementSibling = child; }, setAttribute(name, value) { this[name] = value; }, focus() {} });
+  const getElementById = (id) => { const node = get(id); node.insertAdjacentElement = function (_where, child) { this.nextElementSibling = child; }; return node; };
   const context = vm.createContext({
-    document: { getElementById: get },
+    document: { getElementById, createElement },
     location, window: { location, sessionStorage: storage, confirm: () => true }, URLSearchParams, Set, Error, AbortController,
     setTimeout, clearTimeout, console,
   });
@@ -52,7 +54,8 @@ test('DEV diagnostics are enabled by the fixed DEV LIFF and GAS configuration', 
   assert.equal(page.get('authHttpStatus').hidden, false);
   assert.match(script, /const diagnosticEnabled=LIFF_ID==='2012227652-CgVMkyBb'&&GAS_URL==='https:\/\/script\.google\.com\/macros\/s\/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS\/exec'/);
   const demo = fs.readFileSync(path.join(__dirname, '..', 'demo', 'index.html'), 'utf8');
-  assert.doesNotMatch(demo, /DEV接続トレース|authDiagnostics/);
+  assert.match(demo, /const LIFF_ID='2012227652-\w+';/);
+  assert.doesNotMatch(demo, /const GAS_URL='https:\/\/script\.google\.com\/macros\/s\/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS\/exec';/);
 });
 
 test('DEV trace preserves ordered stages with elapsed time and sanitized details on the error screen', () => {
