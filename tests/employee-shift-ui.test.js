@@ -23,6 +23,9 @@ function element() {
   };
 }
 
+function selectValues(select) { return select.children.map((option) => option.value); }
+function quarterHourValues() { return Array.from({ length: 96 }, (_unused, index) => `${String(Math.floor(index / 4)).padStart(2, '0')}:${String((index % 4) * 15).padStart(2, '0')}`); }
+
 function makePage({ initialState, confirm = true, mutationFailure = null, responseWorkDate = null, dateClass = 'future', actorRole = 'employee', disabledActions = [], shiftWritesEnabled = true, attendanceWritesEnabled = true, attendanceRecords = [] } = {}) {
   const elements = new Map();
   const requests = [];
@@ -315,17 +318,19 @@ test('past and today saves update both records while future saves preserve actua
   assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.attendance', future.context))), priorAttendance, 'future save leaves actual data unchanged');
 });
 
-test('employee and manager inputs use native time controls with a 15-minute step', async () => {
-  const start = html.match(/<input id="startTime"[^>]*>/)?.[0] || '';
-  const end = html.match(/<input id="endTime"[^>]*>/)?.[0] || '';
-  for (const input of [start, end]) {
-    assert.match(input, /type="time"/);
-    assert.match(input, /step="900"/);
+test('employee and manager selects generate 96 quarter-hour choices and leave empty values blank', async () => {
+  const start = html.match(/<select id="startTime"[^>]*>/)?.[0] || '';
+  const end = html.match(/<select id="endTime"[^>]*>/)?.[0] || '';
+  assert.ok(start && end);
+  assert.match(match[1], /for\(let hour=0;hour<24;hour\+\+\)for\(const minute of \['00','15','30','45'\]\)/);
+  assert.doesNotMatch(html, /createTimePicker|time-picker|step="900"|formnovalidate/);
+
+  const empty = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await empty.context.load(false);
+  for (const field of ['startTime', 'endTime']) {
+    assert.equal(empty.get(field).value, '');
+    assert.deepEqual(selectValues(empty.get(field)), ['', ...quarterHourValues()]);
   }
-  assert.match(match[1], /start\.type='time';start\.step='900'/);
-  assert.match(match[1], /end\.type='time';end\.step='900'/);
-  assert.doesNotMatch(html, /createTimePicker|time-picker|TIME_MINUTE_OPTIONS/);
-  assert.match(html, /<button id="saveButton" type="submit" formnovalidate>/);
 
   const row = { employeeId: 'EMP-02', targetActorId: 'EMP-02', displayName: '従業員02', workDate: '2026-10-05', revision: 2, stateToken: 'c'.repeat(64), schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null };
   const page = makePage({ actorRole: 'manager', dateClass: 'future', attendanceRecords: [row] });
@@ -333,10 +338,8 @@ test('employee and manager inputs use native time controls with a 15-minute step
   page.context.render({ actorRole: 'manager', dateClass: 'future', records: [row] });
   const form = page.get('list').children[0].children[4];
   const managerStart = form.children[0].children[1], managerEnd = form.children[1].children[1];
-  for (const input of [managerStart, managerEnd]) {
-    assert.equal(input.type, 'time');
-    assert.equal(input.step, '900');
-  }
+  assert.deepEqual(selectValues(managerStart), ['', ...quarterHourValues()]);
+  assert.deepEqual(selectValues(managerEnd), ['', ...quarterHourValues()]);
   managerStart.value = '09:15'; managerEnd.value = '17:45';
   await form.children[2].children[0].children[0].handlers.click();
   const request = page.requests.find((item) => item.action === 'shiftMutation');
@@ -346,11 +349,15 @@ test('employee and manager inputs use native time controls with a 15-minute step
   assert.match(page.get('status').textContent, /再取得で確認しました/);
 });
 
-test('step constraint does not block preserving non-quarter-hour employee values', async () => {
+test('registered non-quarter-hour values are displayed and preserved without rounding', async () => {
   const page = makePage({ dateClass: 'past', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '08:55', endTime: '17:05' }, attendance: { startTime: '08:55', endTime: '17:05' } } });
   await page.context.load(false);
   assert.equal(page.get('startTime').value, '08:55');
   assert.equal(page.get('endTime').value, '17:05');
+  assert.deepEqual(selectValues(page.get('startTime')), ['', ...quarterHourValues(), '08:55']);
+  assert.deepEqual(selectValues(page.get('endTime')), ['', ...quarterHourValues(), '17:05']);
+  assert.equal(page.get('startTime').children.at(-1).textContent, '08:55（登録済み）');
+  assert.equal(page.get('endTime').children.at(-1).textContent, '17:05（登録済み）');
   assert.equal(vm.runInContext("validTime('08:55') && validTime('17:05')", page.context), true);
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
   let request = page.requests.find((item) => item.action === 'shiftMutation');
@@ -367,12 +374,35 @@ test('step constraint does not block preserving non-quarter-hour employee values
   assert.equal(request.endTime, '17:05');
 });
 
-test('manager standard time inputs retain the existing create and delete mutation behavior', async () => {
+test('date changes and rerenders discard previous temporary non-quarter-hour options', async () => {
+  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '08:55', endTime: '17:05' }, attendance: null } });
+  await page.context.load(false);
+  assert.ok(selectValues(page.get('startTime')).includes('08:55'));
+  page.context.render({ actorRole: 'employee', dateClass: 'future', selfShift: { employeeId: 'EMP-01', displayName: '本人', revision: 2, stateToken: 'b'.repeat(64), schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null } });
+  assert.deepEqual(selectValues(page.get('startTime')), ['', ...quarterHourValues()]);
+  assert.deepEqual(selectValues(page.get('endTime')), ['', ...quarterHourValues()]);
+
+  const manager = makePage();
+  const nonQuarterRow = { employeeId: 'EMP-02', targetActorId: 'EMP-02', displayName: '従業員02', workDate: '2026-10-05', revision: 1, stateToken: 'c'.repeat(64), schedule: { startTime: '08:55', endTime: '17:05' }, attendance: null };
+  const quarterRow = { ...nonQuarterRow, workDate: '2026-10-06', schedule: { startTime: '09:00', endTime: '17:00' } };
+  manager.context.render({ actorRole: 'manager', dateClass: 'future', records: [nonQuarterRow] });
+  let form = manager.get('list').children[0].children[4];
+  assert.ok(selectValues(form.children[0].children[1]).includes('08:55'));
+  manager.context.render({ actorRole: 'manager', dateClass: 'future', records: [quarterRow] });
+  form = manager.get('list').children[0].children[4];
+  assert.deepEqual(selectValues(form.children[0].children[1]), ['', ...quarterHourValues()]);
+  assert.deepEqual(selectValues(form.children[1].children[1]), ['', ...quarterHourValues()]);
+});
+
+test('manager select inputs retain the existing create and delete mutation behavior', async () => {
   const empty = { employeeId: 'EMP-03', targetActorId: 'EMP-03', displayName: '従業員03', workDate: '2026-10-05', revision: 0, stateToken: 'd'.repeat(64), schedule: null, attendance: null };
   const createPage = makePage({ actorRole: 'manager', dateClass: 'future', attendanceRecords: [empty] });
   vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true', createPage.context);
   createPage.context.render({ actorRole: 'manager', dateClass: 'future', records: [empty] });
   let form = createPage.get('list').children[0].children[4];
+  assert.equal(form.children[0].children[1].value, '');
+  assert.deepEqual(selectValues(form.children[0].children[1]), ['', ...quarterHourValues()]);
+  assert.deepEqual(selectValues(form.children[1].children[1]), ['', ...quarterHourValues()]);
   form.children[0].children[1].value = '08:15'; form.children[1].children[1].value = '16:45';
   await form.children[2].children[0].children[0].handlers.click();
   let request = createPage.requests.find((item) => item.action === 'shiftMutation');
@@ -393,6 +423,33 @@ test('manager standard time inputs retain the existing create and delete mutatio
   assert.equal(request.startTime, '');
   assert.equal(request.endTime, '');
   assert.equal(vm.runInContext('entryState.schedule', deletePage.context), null);
+});
+
+test('manager retains non-quarter-hour values on save and on a one-sided edit', async () => {
+  const row = { employeeId: 'EMP-04', targetActorId: 'EMP-04', displayName: '従業員04', workDate: '2026-10-05', revision: 1, stateToken: 'e'.repeat(64), schedule: { startTime: '08:55', endTime: '17:05' }, attendance: null };
+  const unchanged = makePage({ actorRole: 'manager', dateClass: 'future', attendanceRecords: [row] });
+  vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true', unchanged.context);
+  unchanged.context.render({ actorRole: 'manager', dateClass: 'future', records: [row] });
+  let form = unchanged.get('list').children[0].children[4];
+  const start = form.children[0].children[1], end = form.children[1].children[1];
+  assert.equal(start.value, '08:55');
+  assert.equal(end.value, '17:05');
+  assert.equal(start.children.at(-1).textContent, '08:55（登録済み）');
+  assert.equal(end.children.at(-1).textContent, '17:05（登録済み）');
+  await form.children[2].children[0].children[0].handlers.click();
+  let request = unchanged.requests.find((item) => item.action === 'shiftMutation');
+  assert.equal(request.startTime, '08:55');
+  assert.equal(request.endTime, '17:05');
+
+  const edited = makePage({ actorRole: 'manager', dateClass: 'future', attendanceRecords: [row] });
+  vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true', edited.context);
+  edited.context.render({ actorRole: 'manager', dateClass: 'future', records: [row] });
+  form = edited.get('list').children[0].children[4];
+  form.children[0].children[1].value = '09:15';
+  await form.children[2].children[0].children[0].handlers.click();
+  request = edited.requests.find((item) => item.action === 'shiftMutation');
+  assert.equal(request.startTime, '09:15');
+  assert.equal(request.endTime, '17:05');
 });
 
 test('overnight employee schedule continues to save and display with the next-day label', async () => {
@@ -497,7 +554,7 @@ test('initial work date and current employee controls stay in the existing atten
   }
   assert.match(html, /class="entry-actions"[^>]*>[\s\S]*id="saveButton"[\s\S]*id="deleteButton"/);
   assert.match(html, /\.entry-actions\{[^}]*display:flex[^}]*gap:20px/);
-  assert.match(html, /<button id="saveButton" type="submit" formnovalidate>保存<\/button>/);
+  assert.match(html, /<button id="saveButton" type="submit">保存<\/button>/);
   assert.match(html, /<label>開始 /);
   assert.match(html, /<label>終了 /);
   assert.doesNotMatch(html, /id="shiftForm"/);
