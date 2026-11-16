@@ -235,7 +235,7 @@ function renderManagerRecords(records){
  for(const row of records){
   const schedule=normalizeSchedule(row.schedule),attendance=normalizeAttendance(row.attendance),selected=attendance||schedule;
   const card=document.createElement('article'),title=document.createElement('h2'),date=document.createElement('p'),planned=document.createElement('p'),actual=document.createElement('p'),form=document.createElement('div'),actions=document.createElement('div'),saveAction=document.createElement('div'),deleteAction=document.createElement('div');
-  card.dataset.managerCard='true';card.dataset.hasValues=String(!!(schedule||attendance));card.dataset.hasAttendance=String(!!attendance);
+  card.dataset.managerCard='true';card.dataset.managerEmployeeId=row.targetActorId;card.dataset.hasValues=String(!!(schedule||attendance));card.dataset.hasAttendance=String(!!attendance);
   title.textContent=row.displayName;date.textContent='勤務日: '+row.workDate;planned.className='times';planned.textContent='予定: '+(schedule&&schedule.startTime&&schedule.endTime?rangeText(scheduleTime(schedule.startTime),scheduleTime(schedule.endTime),row.plannedEndNextDay):'未登録');actual.textContent='開始・終了: '+(attendance?rangeText(attendance.startTime,attendance.endTime,row.actualEndNextDay):'未登録');
   form.className='manager-entry-form';actions.className='entry-actions';saveAction.className='save-action';deleteAction.className='delete-action';
   const startLabel=document.createElement('label'),start=document.createElement('select'),endLabel=document.createElement('label'),end=document.createElement('select'),save=document.createElement('button'),remove=document.createElement('button');
@@ -253,7 +253,7 @@ function renderManagerRecords(records){
 }
 function managerEntryState(row){
  if(typeof row.targetActorId!=='string'||!row.targetActorId||typeof row.displayName!=='string'||!Number.isSafeInteger(row.revision)||row.revision<0||typeof row.stateToken!=='string'||!/^[a-f0-9]{64}$/.test(row.stateToken))throw Error('manager entry identity');
- return {employeeId:row.targetActorId,attendanceEmployeeId:row.attendanceEmployeeId||'',displayName:row.displayName,revision:row.revision,stateToken:row.stateToken,schedule:normalizeSchedule(row.schedule),attendance:normalizeAttendance(row.attendance),attendanceRevision:Number.isSafeInteger(row.attendanceRevision)?row.attendanceRevision:0};
+ return {employeeId:row.targetActorId,attendanceEmployeeId:row.attendanceEmployeeId||'',displayName:row.displayName,revision:row.revision,stateToken:row.stateToken,schedule:normalizeSchedule(row.schedule),attendance:normalizeAttendance(row.attendance)};
 }
 function render(data){
  list.replaceChildren();entryState=null;dateClass=data.dateClass;managerCreateSection.hidden=data.actorRole!=='manager';
@@ -262,7 +262,7 @@ function render(data){
  if(data.actorRole==='employee'&&data.selfShift){
   const value=data.selfShift;if(typeof value.employeeId!=='string'||!value.employeeId||typeof value.displayName!=='string'||!value.displayName.trim()||!Number.isSafeInteger(value.revision)||value.revision<0||typeof value.stateToken!=='string'||!/^[a-f0-9]{64}$/.test(value.stateToken))throw Error('self entry identity');
   const schedule=normalizeSchedule(value.schedule),attendance=normalizeAttendance(value.attendance);if(!['today','past','future'].includes(dateClass))throw Error('date class');
-  entryState={employeeId:value.employeeId,attendanceEmployeeId:value.attendanceEmployeeId||'',displayName:value.displayName,revision:value.revision,stateToken:value.stateToken,schedule,attendance,attendanceRevision:Number.isSafeInteger(value.attendanceRevision)?value.attendanceRevision:0};
+  entryState={employeeId:value.employeeId,attendanceEmployeeId:value.attendanceEmployeeId||'',displayName:value.displayName,revision:value.revision,stateToken:value.stateToken,schedule,attendance};
   employeeName.textContent=entryState.displayName;plannedTime.textContent=schedule?'予定: '+(schedule.startTime||'未入力')+'–'+(schedule.endTime||'未入力')+(schedule.startTime&&schedule.endTime&&schedule.endTime<schedule.startTime?'（翌日）':''):'シフト予定は未登録です。';
   populateTimeSelect(startTimeInput,attendance?attendance.startTime:(schedule?schedule.startTime:''));populateTimeSelect(endTimeInput,attendance?attendance.endTime:(schedule?schedule.endTime:''));entryCard.hidden=false;applyWriteMode();return;
  }
@@ -281,6 +281,25 @@ function entryOutcomeMatches(data,type,previous,expectedWorkDate,startTime,endTi
  if(data.dateClass==='future'){const old=previous.attendance;return (old===null&&attendance===null)||(old&&attendance&&old.startTime===attendance.startTime&&old.endTime===attendance.endTime);}
  return !!attendance&&attendance.startTime===startTime&&attendance.endTime===endTime;
 }
+function applyMutationResult(result,type,previous,workDate){
+ if(!result||result.ok!==true||result.employeeId!==previous.employeeId||result.workDate!==workDate||!Number.isSafeInteger(result.revision))throw Error('mutation response');
+ const schedule=normalizeSchedule(result.schedule),attendance=normalizeAttendance(result.attendance);
+ entryState={...previous,schedule,attendance,revision:result.revision};
+ if(managerCreateSection.hidden){
+  plannedTime.textContent=schedule?'予定: '+(schedule.startTime||'未入力')+'–'+(schedule.endTime||'未入力')+(schedule.startTime&&schedule.endTime&&schedule.endTime<schedule.startTime?'（翌日）':''):'シフト予定は未登録です。';
+  populateTimeSelect(startTimeInput,attendance?attendance.startTime:(schedule?schedule.startTime:''));populateTimeSelect(endTimeInput,attendance?attendance.endTime:(schedule?schedule.endTime:''));
+ }else{
+  const card=[...list.querySelectorAll('[data-manager-card]')].find(item=>item.dataset.managerEmployeeId===previous.employeeId);
+  if(!card)throw Error('manager card missing');
+  const selected=attendance||schedule,planned=card.querySelector('.times'),actual=card.querySelectorAll('p')[2],start=card.querySelector('[data-manager-start]'),end=card.querySelector('[data-manager-end]');
+  planned.textContent='予定: '+(schedule&&schedule.startTime&&schedule.endTime?rangeText(schedule.startTime,schedule.endTime,schedule.endTime<schedule.startTime):'未登録');
+  actual.textContent='開始・終了: '+(attendance?rangeText(attendance.startTime,attendance.endTime,attendance.endTime<attendance.startTime):'未登録');
+  populateTimeSelect(start,selected?selected.startTime:'');populateTimeSelect(end,selected?selected.endTime:'');
+  card.dataset.hasValues=String(!!(schedule||attendance));card.dataset.hasAttendance=String(!!attendance);
+  if(selectedManagerEmployeeId===previous.employeeId){populateTimeSelect(startTimeInput,selected?selected.startTime:'');populateTimeSelect(endTimeInput,selected?selected.endTime:'');}
+ }
+ applyWriteMode();
+}
 async function mutateEntry(type){
  const current=entryState;if(!current||busy)return;if(!shiftWritesEnabled){clearConnectionError();status.textContent=messages.DISABLED;return;}
  if(type==='delete'){
@@ -295,25 +314,18 @@ async function mutateEntry(type){
  const saveDate=workDateInput.value,startTime=type==='delete'?'':startTimeInput.value,endTime=type==='delete'?'':endTimeInput.value;
  busy=true;workDateInput.disabled=true;retry.disabled=true;applyWriteMode();setLoading(true,type==='delete'?'勤務情報を削除しています…':'勤務情報を保存しています…');let failure=null,successMessage='';
  try{
-  const sendMutation=async(state,id)=>api({action:'shiftMutation',type:type==='delete'?'delete':(state.schedule?'update':'create'),requestId:id,employeeId:state.employeeId,workDate:saveDate,expectedRevision:String(state.revision),expectedStateToken:state.stateToken,startTime,endTime},'mutation');
-  let verificationState=current;
-  try{await sendMutation(current,requestId);}catch(err){failure=err;}
-  if(type==='save'&&failure&&failure.code==='CONFLICT'){
-   let latest=null;try{latest=await load(false,'readback');}catch(_){/* Keep the conflict and do not retry without fresh state. */}
-   if(latest&&entryState&&workDateInput.value===saveDate&&shiftWritesEnabled&&(dateClass==='future'||attendanceWritesEnabled)){
-    verificationState=entryState;populateTimeSelect(startTimeInput,startTime);populateTimeSelect(endTimeInput,endTime);applyWriteMode();
-    try{await sendMutation(verificationState,crypto.randomUUID());failure=null;}catch(err){failure=err;}
-   }
-  }
+  let result=null;
+  try{result=await api({action:'shiftMutation',type:type==='delete'?'delete':(current.schedule?'update':'create'),requestId,employeeId:current.employeeId,workDate:saveDate,expectedRevision:String(current.revision),expectedStateToken:current.stateToken,startTime,endTime},'mutation');}catch(err){failure=err;}
   if(failure&&['AUTH_RECOVERY_NAVIGATING','TOKEN_EXPIRED_RECOVERY_FAILED','AUTHENTICATION_FAILED'].includes(failure.code)){
    if(failure.code!=='AUTH_RECOVERY_NAVIGATING')showConnectionError(failure.code==='TOKEN_EXPIRED_RECOVERY_FAILED'?failure.message:messages.AUTHENTICATION_FAILED,failure.code);
    return;
   }
-  let refreshed=null;try{refreshed=await load(false,'readback');}catch(_){/* Mutation result remains unknown; never retry a write automatically. */}
-  if(refreshed&&entryOutcomeMatches(refreshed,type,verificationState,saveDate,startTime,endTime)){clearConnectionError();successMessage=type==='delete'?'シフト表・勤怠実績の削除結果を再取得で確認しました。':'保存結果をシフト表・勤怠表の再取得で確認しました。';}
-  else if(refreshed&&failure&&failure.code&&failure.code!=='OUTCOME_UNKNOWN'&&failure.code!=='ROLLBACK_FAILED'&&failure.code!=='UNAVAILABLE'){clearConnectionError();status.textContent=failure.message||messages[failure.code]||'処理できませんでした。';}
-  else{const unknown=type==='delete'?DELETE_UNKNOWN_ERROR:SAVE_UNKNOWN_ERROR;showConnectionError(unknown);}
-  if(refreshed&&failure&&failure.code==='CONFLICT'){populateTimeSelect(startTimeInput,startTime);populateTimeSelect(endTimeInput,endTime);applyWriteMode();status.textContent=messages.CONFLICT;}
+  if(result){applyMutationResult(result,type,current,saveDate);clearConnectionError();successMessage=type==='delete'?'削除しました。':'保存しました。';}
+  else if(failure&&(!failure.code||['OUTCOME_UNKNOWN','ROLLBACK_FAILED','UNAVAILABLE','SAVE_UNKNOWN','TRANSPORT_ERROR'].includes(failure.code))){
+   let refreshed=null;try{refreshed=await load(false,'readback');}catch(_){/* Never automatically replay an uncertain mutation. */}
+   if(refreshed&&entryOutcomeMatches(refreshed,type,current,saveDate,startTime,endTime)){clearConnectionError();successMessage=type==='delete'?'削除結果を再取得で確認しました。':'保存結果を再取得で確認しました。';}
+   else showConnectionError(type==='delete'?DELETE_UNKNOWN_ERROR:SAVE_UNKNOWN_ERROR);
+  }else{clearConnectionError();status.textContent=failure&&(failure.message||messages[failure.code])||'処理できませんでした。';}
  }catch(_){
   const unknown=type==='delete'?DELETE_UNKNOWN_ERROR:SAVE_UNKNOWN_ERROR;
   showConnectionError(unknown);
