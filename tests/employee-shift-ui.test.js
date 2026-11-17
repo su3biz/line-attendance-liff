@@ -82,8 +82,10 @@ function makePage({ initialState, confirm = true, mutationFailure = null, respon
         else if (dateClass !== 'future') updated.attendance = { startTime: fields.startTime, endTime: fields.endTime };
         if (mutationFailure === 'after-switch') get('workDate').value = '2026-10-06';
         if (mutationFailure === 'after' || mutationFailure === 'after-switch') throw new Error('simulated lost response');
+        if (mutationFailure === 'outcome-unknown') return { ok: true, json: async () => ({ ok: false, code: 'OUTCOME_UNKNOWN', diagnosticCode: 'post_state_mismatch', performance: { requestId: fields.requestId, timingsMs: { totalMs: 25 } } }) };
         return { ok: true, json: async () => ({ ok: true, code: 'SAVED', employeeId: fields.employeeId, workDate: fields.workDate,
-          schedule: updated.schedule, attendance: updated.attendance, revision: updated.revision, attendanceUpdated: dateClass !== 'future' }) };
+          schedule: updated.schedule, attendance: updated.attendance, revision: updated.revision, attendanceUpdated: dateClass !== 'future',
+          performance: { requestId: fields.requestId, timingsMs: { totalMs: 12, scriptLockWaitMs: 2 }, nested: { readbackMs: 'included in finalStateCheckMs' } } }) };
       }
       if (fields.action === 'register') {
         if (disabledActions.includes('register')) return { ok: true, json: async () => ({ ok: false, code: 'DISABLED' }) };
@@ -162,6 +164,47 @@ test('employee can save an initially empty day from the confirmed mutation respo
   assert.equal(vm.runInContext('entryState.schedule.startTime', page.context), '09:00');
   assert.equal(page.get('status').textContent, '保存しました。');
   assert.equal(page.get('connectionError').hidden, true);
+});
+
+test('DEV save performance result correlates by request ID and includes client and GAS timings', async () => {
+  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await page.context.load(false);
+  page.get('startTime').value = '09:00';page.get('endTime').value = '17:00';
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
+  const output = JSON.parse(page.get('savePerformanceOutput').textContent);
+  const mutation = page.requests.find((request) => request.action === 'shiftMutation');
+  assert.equal(output.requestId, mutation.requestId);
+  assert.equal(output.server.requestId, mutation.requestId);
+  assert.equal(typeof output.client.buttonToApiStartMs, 'number');
+  assert.equal(typeof output.client.fetchStartToResponseMs, 'number');
+  assert.equal(typeof output.client.responseBodyParseMs, 'number');
+  assert.equal(typeof output.client.gasResponseToUiUpdateMs, 'number');
+  assert.equal(typeof output.client.buttonToCompleteMs, 'number');
+  assert.equal(output.server.timingsMs.scriptLockWaitMs, 2);
+  assert.equal(JSON.stringify(output).includes('EMP-01'), false);
+  assert.equal(JSON.stringify(output).includes('09:00'), false);
+  assert.equal(page.requests.filter((request) => request.action === 'shiftMutation').length, 1);
+  assert.equal(page.requests.filter((request) => request.action === 'attendanceList').length, 1, 'initial load only; no post-save refresh');
+
+  const managerRow = { employeeId: 'EMP-02', targetActorId: 'EMP-02', displayName: '従業員02', workDate: '2026-10-05', revision: 0, stateToken: 'c'.repeat(64), schedule: null, attendance: null };
+  const manager = makePage({ actorRole: 'manager', dateClass: 'future', attendanceRecords: [managerRow] });
+  vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true', manager.context);
+  manager.context.render({ actorRole: 'manager', dateClass: 'future', records: [managerRow] });
+  const managerForm = manager.get('list').children[0].children[4];
+  managerForm.children[0].children[1].value = '09:00';managerForm.children[1].children[1].value = '17:00';
+  await managerForm.children[2].children[0].children[0].handlers.click();
+  const managerOutput = JSON.parse(manager.get('savePerformanceOutput').textContent);
+  assert.equal(managerOutput.action, 'save');
+  assert.equal(managerOutput.requestId, manager.requests.find((request) => request.action === 'shiftMutation').requestId);
+  assert.equal(managerOutput.server.requestId, managerOutput.requestId);
+
+  const deletion = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null } });
+  await deletion.context.load(false);
+  await deletion.get('deleteButton').handlers.click();
+  const deleteOutput = JSON.parse(deletion.get('savePerformanceOutput').textContent);
+  assert.equal(deleteOutput.action, 'delete');
+  assert.equal(deleteOutput.requestId, deletion.requests.find((request) => request.action === 'shiftMutation').requestId);
+  assert.equal(deleteOutput.server.requestId, deleteOutput.requestId);
 });
 
 test('employee update uses the current schedule revision', async () => {
@@ -522,6 +565,26 @@ test('DISABLED shift mutation is shown distinctly and never resends the mutation
   assert.equal(page.get('status').textContent, '機能が停止中です。');
   assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
   assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 1, 'only initial load fetches attendance state');
+});
+
+test('OUTCOME_UNKNOWN shows the safe GAS code, measures attendanceList recovery, and never replays mutation', async () => {
+  const page = makePage({ mutationFailure: 'outcome-unknown', dateClass: 'today', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 2, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: { startTime: '09:00', endTime: '17:00' } } });
+  await page.context.load(false);
+  page.get('startTime').value = '09:00';
+  page.get('endTime').value = '17:15';
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
+  assert.equal(page.get('status').textContent, '保存結果を再取得で確認しました。');
+  assert.match(page.get('traceOutput').textContent, /gas_outcome_diagnostic  情報  code post_state_mismatch/);
+  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1, 'uncertain mutation is never resent');
+  assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 2, 'initial load plus one outcome readback');
+  const performance = JSON.parse(page.get('savePerformanceOutput').textContent);
+  assert.equal(performance.outcome, 'confirmed_by_readback');
+  assert.equal(performance.gasDiagnosticCode, 'post_state_mismatch');
+  assert.equal(performance.recovery.action, 'attendanceList');
+  assert.equal(typeof performance.recovery.fetchMs, 'number');
+  assert.equal(typeof performance.recovery.responseParseMs, 'number');
+  assert.equal(typeof performance.recovery.uiUpdateMs, 'number');
+  assert.equal(performance.requestId, page.requests.find((item) => item.action === 'shiftMutation').requestId);
 });
 
 test('DISABLED registration is reported as a definitive result', async () => {
