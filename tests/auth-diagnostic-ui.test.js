@@ -11,8 +11,9 @@ const script = html.match(/<script>\s*([\s\S]*?)<\/script>/)[1].replace(/\nstart
 
 function makePage(search, options = {}) {
   const elements = new Map();
+  const copied = [];
   const get = (id) => {
-    if (!elements.has(id)) elements.set(id, { hidden: false, textContent: '', value: '', disabled: false, children: [], setAttribute() {}, addEventListener() {}, appendChild(child) { this.children.push(child); }, replaceChildren(...children) { this.children = children; }, querySelectorAll() { return []; }, classList: { add() {}, remove() {} } });
+    if (!elements.has(id)) elements.set(id, { hidden: id === 'diagnostics', textContent: '', value: '', disabled: false, children: [], handlers: {}, setAttribute() {}, addEventListener(name, handler) { this.handlers[name] = handler; }, appendChild(child) { this.children.push(child); }, replaceChildren(...children) { this.children = children; }, querySelectorAll() { return []; }, classList: { add() {}, remove() {} } });
     return elements.get(id);
   };
   const stored = new Map();
@@ -27,10 +28,11 @@ function makePage(search, options = {}) {
   const context = vm.createContext({
     document: { getElementById, createElement },
     location, window: { location, sessionStorage: storage, confirm: () => true }, URLSearchParams, Set, Error, AbortController,
+    navigator: { clipboard: { async writeText(value) { copied.push(value); } } },
     setTimeout, clearTimeout, console,
   });
   vm.runInContext(script, context);
-  return { context, get, storage, location };
+  return { context, get, storage, location, copied };
 }
 
 test('DEV diagnostic code appears on the authentication error screen without a query flag', () => {
@@ -49,6 +51,7 @@ test('DEV diagnostic code appears on the authentication error screen without a q
 
 test('DEV diagnostics are enabled by the fixed DEV LIFF and GAS configuration', () => {
   const page = makePage('');
+  assert.equal(page.get('diagnostics').hidden, false, 'DEV trace is visible on initial render');
   vm.runInContext("showConnectionError('', 'AUTHENTICATION_FAILED', 'VERIFY_HTTP_ERROR', 400)", page.context);
   assert.equal(page.get('authDiagnosticCode').hidden, false);
   assert.equal(page.get('authHttpStatus').hidden, false);
@@ -56,6 +59,22 @@ test('DEV diagnostics are enabled by the fixed DEV LIFF and GAS configuration', 
   const demo = fs.readFileSync(path.join(__dirname, '..', 'demo', 'index.html'), 'utf8');
   assert.match(demo, /const LIFF_ID='2012227652-\w+';/);
   assert.doesNotMatch(demo, /const GAS_URL='https:\/\/script\.google\.com\/macros\/s\/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS\/exec';/);
+  assert.match(demo, /const diagnosticEnabled=LIFF_ID==='2012227652-CgVMkyBb'&&GAS_URL==='https:\/\/script\.google\.com\/macros\/s\/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS\/exec'/);
+  assert.match(demo, /diagnosticPanel\.hidden=!diagnosticEnabled/);
+});
+
+test('DEV trace remains visible after clearing an error and the copy button copies the trace', async () => {
+  const page = makePage('');
+  assert.match(script, /function clearConnectionError\(\)\{[^}]*diagnosticPanel\.hidden=!diagnosticEnabled/);
+  assert.match(script, /retry\.disabled=false;clearConnectionError\(\)/, 'attendance reload preserves the DEV panel');
+  assert.match(script, /if\(result\)\{[^}]*clearConnectionError\(\)/, 'confirmed save or delete preserves the DEV panel');
+  assert.match(script, /if\(refreshed&&entryOutcomeMatches\([^}]*clearConnectionError\(\)/, 'confirmed reread preserves the DEV panel');
+  vm.runInContext("trace('attendance_list','成功','response received'); showConnectionError(); clearConnectionError()", page.context);
+  assert.equal(page.get('diagnostics').hidden, false);
+  assert.match(page.get('traceOutput').textContent, /attendance_list  成功/);
+  await page.get('copyTrace').handlers.click();
+  assert.equal(page.copied.length, 1);
+  assert.match(page.copied[0], /attendance_list  成功/);
 });
 
 test('DEV trace preserves ordered stages with elapsed time and sanitized details on the error screen', () => {
