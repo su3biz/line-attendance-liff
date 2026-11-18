@@ -28,7 +28,7 @@ function matches(node,selector){if(selector==='p')return node.tagName==='p';if(s
 function selectValues(select) { return select.children.map((option) => option.value); }
 function quarterHourValues() { return Array.from({ length: 96 }, (_unused, index) => `${String(Math.floor(index / 4)).padStart(2, '0')}:${String((index % 4) * 15).padStart(2, '0')}`); }
 
-function makePage({ initialState, confirm = true, mutationFailure = null, responseWorkDate = null, dateClass = 'future', actorRole = 'employee', disabledActions = [], shiftWritesEnabled = true, attendanceWritesEnabled = true, attendanceRecords = [] } = {}) {
+function makePage({ initialState, confirm = true, mutationFailure = null, responseWorkDate = null, dateClass = 'future', actorRole = 'employee', disabledActions = [], shiftWritesEnabled = true, attendanceWritesEnabled = true, attendanceRecords = [], diagnosticMode = false } = {}) {
   const elements = new Map();
   const requests = [];
   const confirmMessages = [];
@@ -40,7 +40,7 @@ function makePage({ initialState, confirm = true, mutationFailure = null, respon
   };
   const nextState = { stateToken: 'a'.repeat(64), ...initialState };
   const currentRecords = attendanceRecords.map((record) => ({ ...record, schedule: record.schedule && { ...record.schedule }, attendance: record.attendance && { ...record.attendance } }));
-  const location = { href: 'https://example.test/liff', search: '', reload() {} };
+  const location = { href: diagnosticMode ? 'https://example.test/liff?debug=1' : 'https://example.test/liff', search: diagnosticMode ? '?debug=1' : '', reload() {} };
   const context = vm.createContext({
     document: {
       getElementById: get,
@@ -167,7 +167,7 @@ test('employee can save an initially empty day from the confirmed mutation respo
 });
 
 test('DEV save performance result correlates by request ID and includes client and GAS timings', async () => {
-  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  const page = makePage({ diagnosticMode: true, initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
   await page.context.load(false);
   page.get('startTime').value = '09:00';page.get('endTime').value = '17:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
@@ -187,7 +187,7 @@ test('DEV save performance result correlates by request ID and includes client a
   assert.equal(page.requests.filter((request) => request.action === 'attendanceList').length, 1, 'initial load only; no post-save refresh');
 
   const managerRow = { employeeId: 'EMP-02', targetActorId: 'EMP-02', displayName: '従業員02', workDate: '2026-10-05', revision: 0, stateToken: 'c'.repeat(64), schedule: null, attendance: null };
-  const manager = makePage({ actorRole: 'manager', dateClass: 'future', attendanceRecords: [managerRow] });
+  const manager = makePage({ diagnosticMode: true, actorRole: 'manager', dateClass: 'future', attendanceRecords: [managerRow] });
   vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true', manager.context);
   manager.context.render({ actorRole: 'manager', dateClass: 'future', records: [managerRow] });
   const managerForm = manager.get('list').children[0].children[4];
@@ -198,7 +198,7 @@ test('DEV save performance result correlates by request ID and includes client a
   assert.equal(managerOutput.requestId, manager.requests.find((request) => request.action === 'shiftMutation').requestId);
   assert.equal(managerOutput.server.requestId, managerOutput.requestId);
 
-  const deletion = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null } });
+  const deletion = makePage({ diagnosticMode: true, initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null } });
   await deletion.context.load(false);
   await deletion.get('deleteButton').handlers.click();
   const deleteOutput = JSON.parse(deletion.get('savePerformanceOutput').textContent);
@@ -568,7 +568,7 @@ test('DISABLED shift mutation is shown distinctly and never resends the mutation
 });
 
 test('OUTCOME_UNKNOWN shows the safe GAS code, measures attendanceList recovery, and never replays mutation', async () => {
-  const page = makePage({ mutationFailure: 'outcome-unknown', dateClass: 'today', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 2, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: { startTime: '09:00', endTime: '17:00' } } });
+  const page = makePage({ mutationFailure: 'outcome-unknown', diagnosticMode: true, dateClass: 'today', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 2, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: { startTime: '09:00', endTime: '17:00' } } });
   await page.context.load(false);
   page.get('startTime').value = '09:00';
   page.get('endTime').value = '17:15';

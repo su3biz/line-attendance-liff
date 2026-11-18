@@ -72,8 +72,9 @@ const GAS_URL='https://script.google.com/macros/s/AKfycbx4hCvYIKhSJlnDpGaKAUTk8i
 let token='',busy=false,requestSequence=0,liffReady=false,liffInitPromise=null;
 const app=document.getElementById('app');
 // This entry point is bound to the existing DEV LIFF and DEV GAS deployment. DEMO has its own entry point and credentials.
-const diagnosticEnabled=LIFF_ID==='2012227652-CgVMkyBb'&&GAS_URL==='https://script.google.com/macros/s/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS/exec';
+const diagnosticEnabled=LIFF_ID==='2012227652-CgVMkyBb'&&GAS_URL==='https://script.google.com/macros/s/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS/exec'&&new URLSearchParams(window.location.search).get('debug')==='1';
 const savePerformancePanel=document.getElementById('savePerformance'),savePerformanceOutput=document.getElementById('savePerformanceOutput');
+savePerformancePanel.hidden=!diagnosticEnabled;
 function monotonicNow(){try{if(typeof performance!=='undefined'&&typeof performance.now==='function')return performance.now();}catch(_){}return Date.now();}
 function publishSavePerformance(value){if(!diagnosticEnabled)return;try{savePerformanceOutput.textContent=JSON.stringify(value,null,2);savePerformancePanel.hidden=false;}catch(_){}}
 const diagnosticPanel=document.getElementById('diagnostics');diagnosticPanel.hidden=!diagnosticEnabled;

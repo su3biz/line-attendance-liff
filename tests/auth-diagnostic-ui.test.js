@@ -22,7 +22,7 @@ function makePage(search, options = {}) {
     setItem(key, value) { stored.set(key, String(value)); },
     removeItem(key) { stored.delete(key); },
   };
-  const location = { search, href: 'https://example.test/liff?authDiagnostics=DEV', reload: options.reload || (() => {}) };
+  const location = { search, href: `https://example.test/liff${search}`, reload: options.reload || (() => {}) };
   const createElement = (tagName) => ({ tagName: String(tagName).toUpperCase(), value: '', textContent: '', children: [], handlers: {}, classList: { add() {}, remove() {} }, addEventListener(name, handler) { this.handlers[name] = handler; }, append(...children) { this.children.push(...children); }, appendChild(child) { this.children.push(child); }, insertAdjacentElement(_where, child) { this.nextElementSibling = child; }, setAttribute(name, value) { this[name] = value; }, focus() {} });
   const getElementById = (id) => { const node = get(id); node.insertAdjacentElement = function (_where, child) { this.nextElementSibling = child; }; return node; };
   const context = vm.createContext({
@@ -35,36 +35,51 @@ function makePage(search, options = {}) {
   return { context, get, storage, location, copied };
 }
 
-test('DEV diagnostic code appears on the authentication error screen without a query flag', () => {
+test('authentication diagnostics remain hidden without the explicit DEV debug flag', () => {
   const page = makePage('');
   vm.runInContext("showConnectionError('', 'AUTHENTICATION_FAILED', 'VERIFY_HTTP_ERROR', 400)", page.context);
-  assert.equal(page.get('authDiagnosticCode').hidden, false);
-  assert.equal(page.get('authDiagnosticCode').textContent, '診断コード：VERIFY_HTTP_ERROR');
-  assert.equal(page.get('authHttpStatus').hidden, false);
-  assert.equal(page.get('authHttpStatus').textContent, 'HTTPステータス：400');
-  vm.runInContext("showConnectionError('', 'AUTHENTICATION_FAILED', 'VERIFY_HTTP_ERROR', '400')", page.context);
-  assert.equal(page.get('authHttpStatus').hidden, true);
-  vm.runInContext("showConnectionError('', 'AUTHENTICATION_FAILED', 'token-value', 400)", page.context);
+  assert.equal(page.get('diagnostics').hidden, true);
+  assert.equal(page.get('savePerformance').hidden, true);
   assert.equal(page.get('authDiagnosticCode').hidden, true);
   assert.equal(page.get('authHttpStatus').hidden, true);
+  const debug = makePage('?debug=1');
+  vm.runInContext("showConnectionError('', 'AUTHENTICATION_FAILED', 'VERIFY_HTTP_ERROR', 400)", debug.context);
+  assert.equal(debug.get('authDiagnosticCode').hidden, false);
+  assert.equal(debug.get('authDiagnosticCode').textContent, '診断コード：VERIFY_HTTP_ERROR');
+  assert.equal(debug.get('authHttpStatus').hidden, false);
+  assert.equal(debug.get('authHttpStatus').textContent, 'HTTPステータス：400');
+  vm.runInContext("showConnectionError('', 'AUTHENTICATION_FAILED', 'VERIFY_HTTP_ERROR', '400')", debug.context);
+  assert.equal(debug.get('authHttpStatus').hidden, true);
+  vm.runInContext("showConnectionError('', 'AUTHENTICATION_FAILED', 'token-value', 400)", debug.context);
+  assert.equal(debug.get('authDiagnosticCode').hidden, true);
+  assert.equal(debug.get('authHttpStatus').hidden, true);
 });
 
-test('DEV diagnostics are enabled by the fixed DEV LIFF and GAS configuration', () => {
+test('DEV diagnostics require debug=1 and the fixed DEV LIFF and GAS configuration', () => {
+  assert.match(html, /<section id="diagnostics"[^>]* hidden>/, 'trace has a hidden attribute before JavaScript runs');
+  assert.match(html, /<section id="savePerformance"[^>]* hidden>/, 'save performance panel has a hidden attribute before JavaScript runs');
   const page = makePage('');
-  assert.equal(page.get('diagnostics').hidden, false, 'DEV trace is visible on initial render');
+  assert.equal(page.get('diagnostics').hidden, true, 'trace stays hidden in normal mode');
+  assert.equal(page.get('savePerformance').hidden, true, 'save panel stays hidden in normal mode');
   vm.runInContext("showConnectionError('', 'AUTHENTICATION_FAILED', 'VERIFY_HTTP_ERROR', 400)", page.context);
-  assert.equal(page.get('authDiagnosticCode').hidden, false);
-  assert.equal(page.get('authHttpStatus').hidden, false);
-  assert.match(script, /const diagnosticEnabled=LIFF_ID==='2012227652-CgVMkyBb'&&GAS_URL==='https:\/\/script\.google\.com\/macros\/s\/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS\/exec'/);
+  assert.equal(page.get('authDiagnosticCode').hidden, true);
+  const debug = makePage('?debug=1');
+  assert.equal(debug.get('diagnostics').hidden, false, 'trace is visible in DEV diagnostic mode');
+  assert.equal(debug.get('savePerformance').hidden, false, 'save panel is visible in DEV diagnostic mode');
+  vm.runInContext("showConnectionError('', 'AUTHENTICATION_FAILED', 'VERIFY_HTTP_ERROR', 400)", debug.context);
+  assert.equal(debug.get('authDiagnosticCode').hidden, false);
+  assert.equal(debug.get('authHttpStatus').hidden, false);
+  assert.match(script, /const diagnosticEnabled=LIFF_ID==='2012227652-CgVMkyBb'&&GAS_URL==='https:\/\/script\.google\.com\/macros\/s\/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS\/exec'&&new URLSearchParams\(window\.location\.search\)\.get\('debug'\)==='1'/);
   const demo = fs.readFileSync(path.join(__dirname, '..', 'demo', 'index.html'), 'utf8');
   assert.match(demo, /const LIFF_ID='2012227652-\w+';/);
   assert.doesNotMatch(demo, /const GAS_URL='https:\/\/script\.google\.com\/macros\/s\/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS\/exec';/);
-  assert.match(demo, /const diagnosticEnabled=LIFF_ID==='2012227652-CgVMkyBb'&&GAS_URL==='https:\/\/script\.google\.com\/macros\/s\/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS\/exec'/);
+  assert.match(demo, /const diagnosticEnabled=LIFF_ID==='2012227652-CgVMkyBb'&&GAS_URL==='https:\/\/script\.google\.com\/macros\/s\/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS\/exec';/);
+  assert.doesNotMatch(demo, /get\('debug'\)==='1'/, 'DEV debug query support is not added to the DEMO entry point');
   assert.match(demo, /diagnosticPanel\.hidden=!diagnosticEnabled/);
 });
 
-test('DEV trace remains visible after clearing an error and the copy button copies the trace', async () => {
-  const page = makePage('');
+test('DEV trace remains available in explicit diagnostic mode and the copy button copies it', async () => {
+  const page = makePage('?debug=1');
   assert.match(script, /function clearConnectionError\(\)\{[^}]*diagnosticPanel\.hidden=!diagnosticEnabled/);
   assert.match(script, /retry\.disabled=false;clearConnectionError\(\)/, 'attendance reload preserves the DEV panel');
   assert.match(script, /if\(result\)\{[^}]*clearConnectionError\(\)/, 'confirmed save or delete preserves the DEV panel');
@@ -78,7 +93,7 @@ test('DEV trace remains visible after clearing an error and the copy button copi
 });
 
 test('DEV trace preserves ordered stages with elapsed time and sanitized details on the error screen', () => {
-  const page = makePage('?authDiagnostics=DEV');
+  const page = makePage('?debug=1');
   vm.runInContext("trace('liff_init','成功','initialized'); trace('post','失敗','token-value authorization-code'); showConnectionError()", page.context);
   const output = page.get('traceOutput').textContent;
   assert.match(output, /02  \+\d+ms  liff_init  成功  initialized/);
@@ -89,11 +104,11 @@ test('DEV trace preserves ordered stages with elapsed time and sanitized details
   assert.equal(page.get('diagnostics').hidden, false);
   const defaultDev = makePage('');
   vm.runInContext("trace('post','失敗','safe')", defaultDev.context);
-  assert.match(defaultDev.get('traceOutput').textContent, /post  失敗  safe/);
+  assert.equal(defaultDev.get('traceOutput').textContent, '');
 });
 
 test('DEV error screen merges safe server stages and elapsed time without server detail text', async () => {
-  const page = makePage('?authDiagnostics=DEV');
+  const page = makePage('?debug=1');
   page.context.liff = {
     getIDToken: () => 'synthetic-id-token',
     getDecodedIDToken: () => ({ exp: Math.floor(Date.now() / 1000) + 300 }),
@@ -122,8 +137,8 @@ test('DEV error screen merges safe server stages and elapsed time without server
   assert.equal(output.includes('secret exception text'), false);
 });
 
-test('authentication failure trace includes API and verifier error codes on the same screen', async () => {
-  const page = makePage('');
+test('authentication failure trace includes API and verifier error codes in explicit diagnostic mode', async () => {
+  const page = makePage('?debug=1');
   page.context.liff = {
     getIDToken: () => 'synthetic-id-token',
     getDecodedIDToken: () => ({ exp: Math.floor(Date.now() / 1000) + 300 }),
@@ -146,7 +161,7 @@ test('authentication failure trace includes API and verifier error codes on the 
 });
 
 test('authentication failure uses the existing error panel, reconnect control, and value-free diagnostics', async () => {
-  const page = makePage('?authDiagnostics=DEV');
+  const page = makePage('?debug=1');
   page.get('workDate').value = '2026-11-11';
   page.context.initializeLiff = async () => {};
   page.context.liff = {
@@ -176,7 +191,7 @@ test('authentication failure uses the existing error panel, reconnect control, a
 });
 
 test('client and actual GAS request checks show only booleans and mark missing GAS evidence unconfirmed', () => {
-  const page = makePage('?authDiagnostics=DEV');
+  const page = makePage('?debug=1');
   vm.runInContext(`clientTokenDiagnostic={tokenPresent:true,audMatches:true,issMatches:true,expValid:true,subPresent:true,iatValid:false}; renderAuthDetails(null);`, page.context);
   assert.equal(page.get('authTokenPresent').textContent, 'OK');
   assert.equal(page.get('authIatValid').textContent, 'NG');
@@ -197,7 +212,7 @@ test('startup blocks the GAS request for missing, invalid-expiry, and expired ID
   ];
 
   for (const item of cases) {
-    const page = makePage('?authDiagnostics=DEV');
+    const page = makePage('?debug=1');
     let requests = 0;
     page.context.initializeLiff = async () => {};
     page.context.liff = {
@@ -223,7 +238,7 @@ test('startup blocks the GAS request for missing, invalid-expiry, and expired ID
 });
 
 test('startup continues to GAS when the ID token is within its expiry', async () => {
-  const page = makePage('?authDiagnostics=DEV');
+  const page = makePage('?debug=1');
   let requests = 0;
   page.get('workDate').value = '2026-11-11';
   page.context.initializeLiff = async () => {};
@@ -268,7 +283,7 @@ test('every GAS action is blocked before fetch when the current token has expire
 test('LIFF-browser recovery is attempted once and a failed return shows clear guidance', async () => {
   let reloads = 0;
   let requests = 0;
-  const page = makePage('?authDiagnostics=DEV', { reload: () => { reloads += 1; } });
+  const page = makePage('?debug=1', { reload: () => { reloads += 1; } });
   page.context.initializeLiff = async () => {};
   page.context.liff = {
     isInClient: () => true,
@@ -290,7 +305,7 @@ test('LIFF-browser recovery is attempted once and a failed return shows clear gu
 });
 
 test('external-browser recovery logs out and starts one canonical login, then only reloads attendance', async () => {
-  const page = makePage('?authDiagnostics=DEV');
+  const page = makePage('?debug=1');
   page.get('workDate').value = '2026-11-11';
   let exp = Math.floor(Date.now() / 1000) - 5;
   let loginCalls = 0;
