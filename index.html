@@ -283,9 +283,10 @@ function entryOutcomeMatches(data,type,previous,expectedWorkDate,startTime,endTi
  else if(data.actorRole==='employee')value=data.selfShift;
  if(!value)return false;
  const schedule=value.schedule||null,attendance=value.attendance||null;
- if(type==='delete')return schedule===null&&attendance===null&&value.revision===previous.revision+1;
- const expectedRevision=!previous.schedule&&previous.revision===0?0:previous.revision+1;
- if(!schedule||schedule.startTime!==startTime||schedule.endTime!==endTime||value.revision!==expectedRevision)return false;
+ // The canonical sheet readback confirms a mutation. revision remains a numeric
+ // compatibility field, but is no longer an ordered success signal.
+ if(type==='delete')return schedule===null&&attendance===null;
+ if(!schedule||schedule.startTime!==startTime||schedule.endTime!==endTime)return false;
  if(data.dateClass==='future'){const old=previous.attendance;return (old===null&&attendance===null)||(old&&attendance&&old.startTime===attendance.startTime&&old.endTime===attendance.endTime);}
  return !!attendance&&attendance.startTime===startTime&&attendance.endTime===endTime;
 }
