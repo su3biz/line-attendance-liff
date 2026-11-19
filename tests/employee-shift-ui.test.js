@@ -181,7 +181,7 @@ test('employee submits a correction request without sending an employee ID or ch
   assert.equal(page.requests.some((item) => ['shiftMutation','saveActual'].includes(item.action)), false);
   assert.equal(vm.runInContext('entryState.revision', page.context), 2);
   assert.equal(page.get('requestStatusList').children.length, 1);
-  assert.match(page.get('requestStatusList').children[0].children[0].textContent, /10\/05 09:00-17:00.*修正申請中/);
+  assert.match(page.get('requestStatusList').children[0].children[0].textContent, /10\/05 09:00〜17:00.*修正申請中/);
   assert.equal(page.get('saveButton').disabled, false);
 });
 
@@ -246,6 +246,7 @@ test('request list shows pending and rejected requests in target date order with
   const rows = page.get('requestStatusList').children;
   assert.equal(rows.length, 2);
   assert.match(rows[0].children[0].textContent, /^11\/02 .*修正申請中/);
+  assert.match(rows[0].children[0].textContent, /09:00〜17:00/);
   assert.match(rows[1].children[0].textContent, /11\/08 削除申請が却下/);
   assert.equal(rows[0].children[1].dataset.requestId, '22222222-2222-4222-8222-222222222222');
   assert.doesNotMatch(rows[0].children[0].textContent, /22222222-2222-4222-8222-222222222222/);
@@ -341,6 +342,19 @@ test('manager deletion approval edits only date and sends snapshot times unchang
   await row.querySelector('[data-review-approve]').handlers.click();
   const sent=page.requests.find((item)=>item.action==='requestApprove');
   assert.equal(sent.workDate,'2026-11-06');assert.equal(sent.startTime,'08:55');assert.equal(sent.endTime,'17:05');
+});
+
+test('empty deletion request times are omitted from employee status and manager list', async () => {
+  const request={requestId:'abababab-abab-4bab-8bab-abababababab',workDate:'2026-11-28',startTime:'',endTime:'',requestType:'削除申請',status:'申請中',displayName:'田中',employeeOrder:1};
+  const employee=makePage({initialRequests:[request],initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,schedule:null,attendance:null}});
+  await employee.context.load(false);
+  assert.match(employee.get('requestStatusList').children[0].children[0].textContent,/11\/28 削除申請中/);
+  assert.doesNotMatch(employee.get('requestStatusList').children[0].children[0].textContent,/1899|GMT|～/);
+
+  const manager=makePage({actorRole:'manager',initialRequests:[request]});
+  await manager.context.load(false);
+  const row=manager.get('managerRequestList').children[0];
+  assert.equal(row.querySelector('[data-review-read-only-times]'),null);
 });
 
 test('manager rejection calls requestReject and removes the request from pending list', async () => {

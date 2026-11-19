@@ -255,7 +255,7 @@ function renderRequests(requests){
  for(const row of ordered){
   const line=document.createElement('div');line.className='request-row';line.dataset.requestRow='true';
   const label=document.createElement('span'),date=requestDateLabel(row.workDate);let message='';
-  if(row.requestType==='修正申請')message=row.status==='申請中'?date+' '+row.startTime+'-'+row.endTime+' の内容で、修正申請中':date+' '+row.startTime+'-'+row.endTime+' の修正申請が却下されました。取り消して、再度申請してください。';
+  if(row.requestType==='修正申請')message=row.status==='申請中'?date+' '+row.startTime+'〜'+row.endTime+' の内容で、修正申請中':date+' '+row.startTime+'〜'+row.endTime+' の修正申請が却下されました。取り消して、再度申請してください。';
   else if(row.requestType==='削除申請')message=row.status==='申請中'?date+' 削除申請中':date+' 削除申請が却下されました。取り消して、再度申請してください。';
   else continue;
   label.textContent=message;line.appendChild(label);
@@ -282,7 +282,7 @@ function renderManagerRequests(requests){
    const start=document.createElement('input');start.type='time';start.step='60';start.value=request.startTime||'';start.dataset.reviewField='true';start.dataset.reviewStart='true';start.setAttribute('aria-label','承認開始時刻');fields.appendChild(start);
    const separator=document.createElement('span');separator.textContent='～';fields.appendChild(separator);
    const end=document.createElement('input');end.type='time';end.step='60';end.value=request.endTime||'';end.dataset.reviewField='true';end.dataset.reviewEnd='true';end.setAttribute('aria-label','承認終了時刻');fields.appendChild(end);
-  }else{const times=document.createElement('span');times.textContent=(request.startTime||'')+' ～ '+(request.endTime||'');times.dataset.reviewReadOnlyTimes='true';fields.appendChild(times);}
+  }else{const startTime=request.startTime||'',endTime=request.endTime||'';if(startTime||endTime){const times=document.createElement('span');times.textContent=startTime&&endTime?startTime+' ～ '+endTime:(startTime||endTime);times.dataset.reviewReadOnlyTimes='true';fields.appendChild(times);}}
   row.appendChild(fields);
   const actions=document.createElement('div');actions.className='manager-request-actions';
   const approve=document.createElement('button');approve.type='button';approve.textContent='承認';approve.dataset.reviewApprove='true';approve.dataset.requestId=request.requestId;approve.addEventListener('click',()=>approveManagerRequest(request,row));actions.appendChild(approve);
