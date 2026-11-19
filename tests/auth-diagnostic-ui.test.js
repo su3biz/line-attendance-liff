@@ -26,7 +26,7 @@ function makePage(search, options = {}) {
   const createElement = (tagName) => ({ tagName: String(tagName).toUpperCase(), value: '', textContent: '', children: [], handlers: {}, classList: { add() {}, remove() {} }, addEventListener(name, handler) { this.handlers[name] = handler; }, append(...children) { this.children.push(...children); }, appendChild(child) { this.children.push(child); }, insertAdjacentElement(_where, child) { this.nextElementSibling = child; }, setAttribute(name, value) { this[name] = value; }, focus() {} });
   const getElementById = (id) => { const node = get(id); node.insertAdjacentElement = function (_where, child) { this.nextElementSibling = child; }; return node; };
   const context = vm.createContext({
-    document: { getElementById, createElement },
+    document: { visibilityState: 'visible', getElementById, createElement, addEventListener() {} },
     location, window: { location, sessionStorage: storage, confirm: () => true }, URLSearchParams, Set, Error, AbortController,
     navigator: { clipboard: { async writeText(value) { copied.push(value); } } },
     setTimeout, clearTimeout, console,
@@ -304,7 +304,7 @@ test('LIFF-browser recovery is attempted once and a failed return shows clear gu
   assert.equal(page.get('authDetails').hidden, false, 'DEV auth diagnostics stay visible');
 });
 
-test('external-browser recovery logs out and starts one canonical login, then only reloads attendance', async () => {
+test('external-browser recovery logs out and reloads attendance plus manager requests after login', async () => {
   const page = makePage('?debug=1');
   page.get('workDate').value = '2026-11-11';
   let exp = Math.floor(Date.now() / 1000) - 5;
@@ -333,11 +333,10 @@ test('external-browser recovery logs out and starts one canonical login, then on
   exp = Math.floor(Date.now() / 1000) + 300;
   await page.context.start();
   assert.equal(loginCalls, 1, 'returning from login does not start another login');
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0], 'attendanceList', 'recovery reloads only the attendance list');
+  assert.deepEqual(requests, ['attendanceList','requestList']);
 });
 
-test('expired save is never replayed after the login return; only attendance is requested', async () => {
+test('expired save is never replayed after the login return; attendance and manager requests are loaded', async () => {
   const page = makePage('');
   page.get('workDate').value = '2026-11-11';
   let exp = Math.floor(Date.now() / 1000) - 1;
@@ -373,5 +372,5 @@ test('expired save is never replayed after the login return; only attendance is 
   await page.context.start();
 
   assert.equal(loginCalls, 1);
-  assert.deepEqual(requests, ['attendanceList']);
+  assert.deepEqual(requests, ['attendanceList','requestList']);
 });

@@ -28,9 +28,10 @@ function matches(node,selector){if(selector==='p')return node.tagName==='p';if(s
 function selectValues(select) { return select.children.map((option) => option.value); }
 function quarterHourValues() { return Array.from({ length: 96 }, (_unused, index) => `${String(Math.floor(index / 4)).padStart(2, '0')}:${String((index % 4) * 15).padStart(2, '0')}`); }
 
-function makePage({ initialState, confirm = true, mutationFailure = null, responseWorkDate = null, dateClass = 'future', actorRole = 'employee', disabledActions = [], shiftWritesEnabled = true, attendanceWritesEnabled = true, attendanceRecords = [], diagnosticMode = false } = {}) {
+function makePage({ initialState, confirm = true, mutationFailure = null, requestFailure = null, approveFailure = null, rejectFailure = null, responseWorkDate = null, dateClass = 'future', actorRole = 'employee', disabledActions = [], shiftWritesEnabled = true, attendanceWritesEnabled = true, attendanceRecords = [], diagnosticMode = false, initialRequests = [], duplicateRequest = false } = {}) {
   const elements = new Map();
   const requests = [];
+  const employeeRequests = initialRequests.map((request) => ({ ...request }));
   const confirmMessages = [];
   const stored = new Map();
   let id = 0;
@@ -43,9 +44,11 @@ function makePage({ initialState, confirm = true, mutationFailure = null, respon
   const location = { href: diagnosticMode ? 'https://example.test/liff?debug=1' : 'https://example.test/liff', search: diagnosticMode ? '?debug=1' : '', reload() {} };
   const context = vm.createContext({
     document: {
+      visibilityState: 'visible', handlers: {},
       getElementById: get,
       createElement: (tagName) => Object.assign(element(), { tagName }),
       createTextNode: (textContent) => ({ textContent }),
+      addEventListener(name, handler) { this.handlers[name] = handler; },
     },
     window: {
       confirm(message) { confirmMessages.push(message); return confirm; },
@@ -91,6 +94,33 @@ function makePage({ initialState, confirm = true, mutationFailure = null, respon
         if (disabledActions.includes('register')) return { ok: true, json: async () => ({ ok: false, code: 'DISABLED' }) };
         throw new Error('unexpected register action');
       }
+      if (fields.action === 'requestList') { const rows=actorRole==='manager'?employeeRequests.filter((request)=>request.status==='申請中'):employeeRequests;return { ok: true, json: async () => ({ ok: true, requests: rows, count: rows.length }) }; }
+      if (fields.action === 'requestCreate') {
+        if (duplicateRequest) return { ok: true, json: async () => ({ ok: false, code: 'DUPLICATE_REQUEST' }) };
+        const requestId = `00000000-0000-4000-8000-${String(employeeRequests.length + 1).padStart(12,'0')}`;
+        if (requestFailure === 'before') throw new Error('simulated request failure');
+        employeeRequests.push({ requestId, workDate: fields.workDate, startTime: fields.startTime, endTime: fields.endTime, requestType: fields.requestType, status: '申請中' });
+        if (requestFailure === 'after') throw new Error('simulated lost request response');
+        return { ok: true, json: async () => ({ ok: true, requestId }) };
+      }
+      if (fields.action === 'requestCancel') {
+        if (requestFailure === 'cancel-before') throw new Error('simulated cancellation failure');
+        const index = employeeRequests.findIndex((request) => request.requestId === fields.requestId);
+        if (index < 0) return { ok: true, json: async () => ({ ok: false, code: 'REQUEST_NOT_FOUND' }) };
+        employeeRequests.splice(index, 1);
+        if (requestFailure === 'cancel-after') throw new Error('simulated lost cancellation response');
+        return { ok: true, json: async () => ({ ok: true }) };
+      }
+      if (fields.action === 'requestApprove') {
+        if (approveFailure) return { ok: true, json: async () => ({ ok: false, code: approveFailure }) };
+        const index=employeeRequests.findIndex((request)=>request.requestId===fields.requestId);if(index>=0)employeeRequests.splice(index,1);
+        return { ok: true, json: async () => ({ ok: true, code: 'APPROVED', requestId: fields.requestId }) };
+      }
+      if (fields.action === 'requestReject') {
+        if (rejectFailure) return { ok: true, json: async () => ({ ok: false, code: rejectFailure }) };
+        const request=employeeRequests.find((item)=>item.requestId===fields.requestId);if(request)request.status='却下';
+        return { ok: true, json: async () => ({ ok: true, requestId: fields.requestId, status: '却下' }) };
+      }
       if (fields.action === 'attendanceList') {
         if (disabledActions.includes('attendanceList')) return { ok: true, json: async () => ({ ok: false, code: 'DISABLED' }) };
         return {
@@ -107,7 +137,7 @@ function makePage({ initialState, confirm = true, mutationFailure = null, respon
   const script = match[1].replace(/\nstart\(\);\s*$/, '\n');
   vm.runInContext(script, context);
   get('workDate').value = '2026-10-05';
-  return { context, get, requests, confirmMessages };
+  return { context, get, requests, confirmMessages, employeeRequests };
 }
 
 test('selecting a date closes the shared calendar input and reloads that date for employee and manager views', () => {
@@ -137,54 +167,47 @@ test('calendar month navigation has no date-change handler and does not close or
   assert.equal(page.get('workDate').blurCount, 0);
 });
 
-test('employee can create a shift through the current entry form with the authenticated identity and revision', async () => {
+test('employee submits a correction request without sending an employee ID or changing attendance', async () => {
   const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 2, schedule: null, attendance: null } });
   await page.context.load(false);
   page.get('startTime').value = '09:00';
   page.get('endTime').value = '17:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
-  const request = page.requests.find((item) => item.action === 'shiftMutation');
+  const request = page.requests.find((item) => item.action === 'requestCreate');
   assert.deepEqual(request, {
-    id_token: 'test-line-id-token', action: 'shiftMutation', type: 'create', employeeId: 'EMP-01', workDate: '2026-10-05',
-    expectedRevision: '2', expectedStateToken: 'a'.repeat(64), requestId: 'request-0001', startTime: '09:00', endTime: '17:00',
+    id_token: 'test-line-id-token', action: 'requestCreate', requestType: '修正申請', workDate: '2026-10-05', startTime: '09:00', endTime: '17:00',
   });
   assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 1);
-  assert.equal(vm.runInContext('entryState.revision', page.context), 3);
+  assert.equal(page.requests.some((item) => ['shiftMutation','saveActual'].includes(item.action)), false);
+  assert.equal(vm.runInContext('entryState.revision', page.context), 2);
+  assert.equal(page.get('requestStatusList').children.length, 1);
+  assert.match(page.get('requestStatusList').children[0].children[0].textContent, /10\/05 09:00-17:00.*修正申請中/);
   assert.equal(page.get('saveButton').disabled, false);
 });
 
-test('employee can save an initially empty day from the confirmed mutation response', async () => {
+test('employee request leaves initially empty attendance data unchanged', async () => {
   const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
   await page.context.load(false);
   page.get('startTime').value = '09:00';
   page.get('endTime').value = '17:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
-  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
+  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 0);
+  assert.equal(page.requests.filter((item) => item.action === 'requestCreate').length, 1);
   assert.equal(vm.runInContext('entryState.revision', page.context), 0);
-  assert.equal(vm.runInContext('entryState.schedule.startTime', page.context), '09:00');
-  assert.equal(page.get('status').textContent, '保存しました。');
+  assert.equal(vm.runInContext('entryState.schedule', page.context), null);
+  assert.equal(page.get('status').textContent, '修正申請を受け付けました。');
   assert.equal(page.get('connectionError').hidden, true);
 });
 
-test('DEV save performance result correlates by request ID and includes client and GAS timings', async () => {
+test('employee requests do not produce shift mutation performance diagnostics; manager direct save remains unchanged', async () => {
   const page = makePage({ diagnosticMode: true, initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
   await page.context.load(false);
   page.get('startTime').value = '09:00';page.get('endTime').value = '17:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
-  const output = JSON.parse(page.get('savePerformanceOutput').textContent);
-  const mutation = page.requests.find((request) => request.action === 'shiftMutation');
-  assert.equal(output.requestId, mutation.requestId);
-  assert.equal(output.server.requestId, mutation.requestId);
-  assert.equal(typeof output.client.buttonToApiStartMs, 'number');
-  assert.equal(typeof output.client.fetchStartToResponseMs, 'number');
-  assert.equal(typeof output.client.responseBodyParseMs, 'number');
-  assert.equal(typeof output.client.gasResponseToUiUpdateMs, 'number');
-  assert.equal(typeof output.client.buttonToCompleteMs, 'number');
-  assert.equal(output.server.timingsMs.scriptLockWaitMs, 2);
-  assert.equal(JSON.stringify(output).includes('EMP-01'), false);
-  assert.equal(JSON.stringify(output).includes('09:00'), false);
-  assert.equal(page.requests.filter((request) => request.action === 'shiftMutation').length, 1);
-  assert.equal(page.requests.filter((request) => request.action === 'attendanceList').length, 1, 'initial load only; no post-save refresh');
+  assert.equal(page.get('savePerformanceOutput').textContent, '');
+  assert.equal(page.requests.filter((request) => request.action === 'shiftMutation').length, 0);
+  assert.equal(page.requests.filter((request) => request.action === 'requestCreate').length, 1);
+  assert.equal(page.requests.filter((request) => request.action === 'requestList').length, 2, 'initial load and post-create refresh');
 
   const managerRow = { employeeId: 'EMP-02', targetActorId: 'EMP-02', displayName: '従業員02', workDate: '2026-10-05', revision: 0, stateToken: 'c'.repeat(64), schedule: null, attendance: null };
   const manager = makePage({ diagnosticMode: true, actorRole: 'manager', dateClass: 'future', attendanceRecords: [managerRow] });
@@ -198,43 +221,160 @@ test('DEV save performance result correlates by request ID and includes client a
   assert.equal(managerOutput.requestId, manager.requests.find((request) => request.action === 'shiftMutation').requestId);
   assert.equal(managerOutput.server.requestId, managerOutput.requestId);
 
-  const deletion = makePage({ diagnosticMode: true, initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null } });
-  await deletion.context.load(false);
-  await deletion.get('deleteButton').handlers.click();
-  const deleteOutput = JSON.parse(deletion.get('savePerformanceOutput').textContent);
-  assert.equal(deleteOutput.action, 'delete');
-  assert.equal(deleteOutput.requestId, deletion.requests.find((request) => request.action === 'shiftMutation').requestId);
-  assert.equal(deleteOutput.server.requestId, deleteOutput.requestId);
+  assert.equal(manager.requests.filter((request) => request.action === 'shiftMutation').length, 1);
 });
 
-test('employee update uses the current schedule revision', async () => {
+test('employee correction request sends the selected date and edited values', async () => {
   const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 4, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null } });
   await page.context.load(false);
   page.get('startTime').value = '10:00';
   page.get('endTime').value = '18:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
-  const request = page.requests.find((item) => item.action === 'shiftMutation');
-  assert.equal(request.type, 'update');
-  assert.equal(request.expectedRevision, '4');
+  const request = page.requests.find((item) => item.action === 'requestCreate');
+  assert.equal(request.requestType, '修正申請');
+  assert.equal(request.workDate, '2026-10-05');
   assert.equal(request.startTime, '10:00');
   assert.equal(request.endTime, '18:00');
 });
 
+test('request list shows pending and rejected requests in target date order without exposing UUID', async () => {
+  const page = makePage({ initialRequests: [
+    { requestId: '11111111-1111-4111-8111-111111111111', workDate: '2026-11-08', startTime: '10:00', endTime: '18:00', requestType: '削除申請', status: '却下' },
+    { requestId: '22222222-2222-4222-8222-222222222222', workDate: '2026-11-02', startTime: '09:00', endTime: '17:00', requestType: '修正申請', status: '申請中' },
+  ], initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await page.context.load(false);
+  const rows = page.get('requestStatusList').children;
+  assert.equal(rows.length, 2);
+  assert.match(rows[0].children[0].textContent, /^11\/02 .*修正申請中/);
+  assert.match(rows[1].children[0].textContent, /11\/08 削除申請が却下/);
+  assert.equal(rows[0].children[1].dataset.requestId, '22222222-2222-4222-8222-222222222222');
+  assert.doesNotMatch(rows[0].children[0].textContent, /22222222-2222-4222-8222-222222222222/);
+});
 
-test('a stale state token does not cause a conflict retry or post-save reload', async () => {
+test('duplicate request displays a clear message and does not send direct shift mutation', async () => {
+  const page = makePage({ duplicateRequest: true, initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await page.context.load(false);page.get('startTime').value='09:00';page.get('endTime').value='17:00';
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
+  assert.match(page.get('status').textContent, /すでに申請があります/);
+  assert.equal(page.requests.filter((request) => request.action === 'shiftMutation').length, 0);
+});
+
+test('request cancellation uses the hidden UUID and refreshes list; canceled date can be requested again', async () => {
+  const page = makePage({ initialRequests: [{ requestId: '33333333-3333-4333-8333-333333333333', workDate: '2026-10-05', startTime: '09:00', endTime: '17:00', requestType: '修正申請', status: '申請中' }], initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await page.context.load(false);
+  await page.get('requestStatusList').children[0].children[1].handlers.click();
+  assert.deepEqual(page.requests.find((request) => request.action === 'requestCancel'), { id_token: 'test-line-id-token', action: 'requestCancel', requestId: '33333333-3333-4333-8333-333333333333' });
+  assert.equal(page.get('requestStatusList').children.length, 0);
+  page.get('startTime').value='09:00';page.get('endTime').value='17:00';
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
+  assert.equal(page.requests.filter((request) => request.action === 'requestCreate').length, 1);
+  assert.equal(page.get('requestStatusList').children.length, 1);
+});
+
+test('screen becoming visible refreshes request status', async () => {
+  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await page.context.load(false);
+  const before = page.requests.filter((request) => request.action === 'requestList').length;
+  page.context.document.handlers.visibilitychange();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(page.requests.filter((request) => request.action === 'requestList').length, before + 1);
+});
+
+test('busy gate prevents a second correction request while the first is in flight', async () => {
+  const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await page.context.load(false);page.get('startTime').value='09:00';page.get('endTime').value='17:00';
+  const originalFetch = page.context.fetch;
+  let finish, interceptedCreates = 0;
+  page.context.fetch = async (url, options) => {
+    const fields = Object.fromEntries(new URLSearchParams(options.body).entries());
+    if (fields.action === 'requestCreate') { interceptedCreates++; return new Promise((resolve) => { finish = () => { page.employeeRequests.push({ requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', workDate: fields.workDate, startTime: fields.startTime, endTime: fields.endTime, requestType: fields.requestType, status: '申請中' });resolve({ ok: true, json: async () => ({ ok: true, requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' }) }); }; }); }
+    return originalFetch(url, options);
+  };
+  const first = page.get('entryForm').handlers.submit({ preventDefault() {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  await page.get('entryForm').handlers.submit({ preventDefault() {} });
+  assert.equal(interceptedCreates, 1, 'second submission is blocked by busy');
+  finish();await first;
+  assert.equal(page.get('requestStatusList').children.length, 1);
+});
+
+test('unknown cancellation result refreshes requests and confirms when UUID is gone', async () => {
+  const page = makePage({ requestFailure: 'cancel-after', initialRequests: [{ requestId: '44444444-4444-4444-8444-444444444444', workDate: '2026-10-05', startTime: '09:00', endTime: '17:00', requestType: '削除申請', status: '申請中' }], initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await page.context.load(false);await page.get('requestStatusList').children[0].children[1].handlers.click();
+  assert.equal(page.get('requestStatusList').children.length, 0);
+  assert.equal(page.get('status').textContent, '申請の取消しを確認しました。');
+  assert.equal(page.requests.filter((request) => request.action === 'requestCancel').length, 1);
+});
+
+test('manager sees only pending requests with the matching count in a collapsible section', async () => {
+  const page=makePage({actorRole:'manager',initialRequests:[
+    {requestId:'55555555-5555-4555-8555-555555555555',workDate:'2026-11-03',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'申請中',displayName:'田中',employeeOrder:1},
+    {requestId:'66666666-6666-4666-8666-666666666666',workDate:'2026-11-04',startTime:'10:00',endTime:'18:00',requestType:'削除申請',status:'却下',displayName:'佐藤',employeeOrder:2},
+  ]});
+  await page.context.load(false);
+  assert.equal(page.get('managerRequestSection').hidden,false);
+  assert.equal(page.get('managerRequestCount').textContent,'1件の申請があります。');
+  assert.equal(page.get('managerRequestList').children.length,1);
+  assert.equal(page.get('managerRequestList').children[0].children[0].children[0].textContent,'田中');
+  assert.equal(page.get('managerRequestSection').tagName,undefined); // native <details> uses the existing disclosure behavior
+  assert.match(html,/<details id="managerRequestSection"/);
+});
+
+test('manager edits correction date and times and approves through requestApprove', async () => {
+  const request={requestId:'77777777-7777-4777-8777-777777777777',workDate:'2026-11-03',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'申請中',displayName:'田中',employeeOrder:1};
+  const page=makePage({actorRole:'manager',initialRequests:[request]});await page.context.load(false);
+  const row=page.get('managerRequestList').children[0];
+  row.querySelector('[data-review-date]').value='2026-11-05';row.querySelector('[data-review-start]').value='10:15';row.querySelector('[data-review-end]').value='18:30';
+  await row.querySelector('[data-review-approve]').handlers.click();
+  assert.deepEqual(page.requests.find((item)=>item.action==='requestApprove'),{id_token:'test-line-id-token',action:'requestApprove',requestId:'77777777-7777-4777-8777-777777777777',workDate:'2026-11-05',startTime:'10:15',endTime:'18:30'});
+  assert.equal(page.get('managerRequestCount').textContent,'0件の申請があります。');
+  assert.equal(page.get('status').textContent,'申請を承認しました。');
+});
+
+test('manager deletion approval edits only date and sends snapshot times unchanged', async () => {
+  const request={requestId:'88888888-8888-4888-8888-888888888888',workDate:'2026-11-03',startTime:'08:55',endTime:'17:05',requestType:'削除申請',status:'申請中',displayName:'田中',employeeOrder:1};
+  const page=makePage({actorRole:'manager',initialRequests:[request]});await page.context.load(false);
+  const row=page.get('managerRequestList').children[0];
+  row.querySelector('[data-review-date]').value='2026-11-06';
+  assert.equal(row.querySelector('[data-review-start]'),null);
+  assert.equal(row.querySelector('[data-review-read-only-times]').textContent,'08:55 ～ 17:05');
+  await row.querySelector('[data-review-approve]').handlers.click();
+  const sent=page.requests.find((item)=>item.action==='requestApprove');
+  assert.equal(sent.workDate,'2026-11-06');assert.equal(sent.startTime,'08:55');assert.equal(sent.endTime,'17:05');
+});
+
+test('manager rejection calls requestReject and removes the request from pending list', async () => {
+  const request={requestId:'99999999-9999-4999-8999-999999999999',workDate:'2026-11-03',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'申請中',displayName:'田中',employeeOrder:1};
+  const page=makePage({actorRole:'manager',initialRequests:[request]});await page.context.load(false);
+  await page.get('managerRequestList').children[0].querySelector('[data-review-reject]').handlers.click();
+  assert.deepEqual(page.requests.find((item)=>item.action==='requestReject'),{id_token:'test-line-id-token',action:'requestReject',requestId:'99999999-9999-4999-8999-999999999999'});
+  assert.equal(page.get('managerRequestCount').textContent,'0件の申請があります。');
+});
+
+test('failed approval leaves request available for a manual retry', async () => {
+  const request={requestId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',workDate:'2026-11-03',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'申請中',displayName:'田中',employeeOrder:1};
+  const page=makePage({actorRole:'manager',approveFailure:'APPROVAL_SAVE_FAILED',initialRequests:[request]});await page.context.load(false);
+  const row=page.get('managerRequestList').children[0];await row.querySelector('[data-review-approve]').handlers.click();
+  assert.equal(row.querySelector('[data-review-approve]').disabled,false);
+  assert.equal(page.get('managerRequestCount').textContent,'1件の申請があります。');
+  assert.match(page.get('status').textContent,/保存できませんでした/);
+  assert.equal(page.requests.filter((item)=>item.action==='requestApprove').length,1);
+});
+
+
+test('employee correction does not use attendance revisions or reload attendance after submission', async () => {
   const page = makePage({
     initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 4, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null },
   });
   await page.context.load(false);
   page.get('startTime').value = '10:00'; page.get('endTime').value = '18:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
-  const mutations = page.requests.filter((item) => item.action === 'shiftMutation');
-  assert.equal(mutations.length, 1);
-  assert.equal(mutations[0].expectedStateToken, 'a'.repeat(64));
+  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 0);
+  assert.equal(page.requests.filter((item) => item.action === 'requestCreate').length, 1);
   assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 1);
   assert.equal(page.get('startTime').value, '10:00');
   assert.equal(page.get('endTime').value, '18:00');
-  assert.equal(page.get('status').textContent, '保存しました。');
+  assert.equal(page.get('status').textContent, '修正申請を受け付けました。');
 });
 
 test('startup clears the busy gate and applies current writer permissions to initial buttons', async () => {
@@ -251,41 +391,39 @@ test('startup clears the busy gate and applies current writer permissions to ini
   assert.equal(populated.get('deleteButton').disabled, false);
 });
 
-test('shift deletion asks for confirmation and sends no mutation when cancelled', async () => {
+test('shift deletion asks for confirmation and sends no request when cancelled', async () => {
   const page = makePage({ confirm: false, initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null } });
   await page.context.load(false);
   await page.get('deleteButton').handlers.click();
-  assert.equal(page.requests.some((item) => item.action === 'shiftMutation'), false);
+  assert.equal(page.requests.some((item) => item.action === 'requestCreate'), false);
 });
 
-test('confirmed deletion sends one revisioned mutation and verifies by rereading attendanceList', async () => {
+test('confirmed deletion submits a request with displayed times and refreshes request list', async () => {
   const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: { startTime: '08:55', endTime: '17:05' } } });
   await page.context.load(false);
   await page.get('deleteButton').handlers.click();
   assert.match(page.confirmMessages[0], /2026-10-05/);
-  assert.match(page.confirmMessages[0], /シフト表・勤怠実績/);
-  const request = page.requests.find((item) => item.action === 'shiftMutation');
-  assert.equal(request.type, 'delete');
-  assert.equal(request.expectedRevision, '1');
-  assert.equal(request.startTime, '');
-  assert.equal(request.endTime, '');
+  assert.match(page.confirmMessages[0], /削除を申請/);
+  const request = page.requests.find((item) => item.action === 'requestCreate');
+  assert.equal(request.requestType, '削除申請');
+  assert.equal(request.startTime, '08:55');
+  assert.equal(request.endTime, '17:05');
   assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 1);
-  assert.equal(vm.runInContext('entryState.schedule', page.context), null);
-  assert.equal(vm.runInContext('entryState.attendance', page.context), null);
-  assert.equal(page.get('status').textContent, '削除しました。');
-  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
+  assert.equal(vm.runInContext('entryState.schedule.startTime', page.context), '09:00');
+  assert.equal(vm.runInContext('entryState.attendance.startTime', page.context), '08:55');
+  assert.equal(page.get('status').textContent, '削除申請を受け付けました。');
+  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 0);
 });
 
-test('actual-only day can delete the actual record and preserve the empty schedule', async () => {
+test('actual-only day can request deletion while preserving the displayed record', async () => {
   const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: { startTime: '08:55', endTime: '17:05' } } });
   await page.context.load(false);
   assert.equal(page.get('deleteButton').disabled, false);
   await page.get('deleteButton').handlers.click();
-  assert.match(page.confirmMessages[0], /勤怠実績を削除/);
-  assert.doesNotMatch(page.confirmMessages[0], /シフト表・/);
-  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
+  assert.equal(page.requests.find((item) => item.action === 'requestCreate').requestType, '削除申請');
+  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 0);
   assert.equal(vm.runInContext('entryState.schedule', page.context), null);
-  assert.equal(vm.runInContext('entryState.attendance', page.context), null);
+  assert.equal(vm.runInContext('entryState.attendance.startTime', page.context), '08:55');
 });
 
 test('empty day disables delete and preserves both empty records', async () => {
@@ -315,7 +453,7 @@ test('all four cases display the specified source times and enable delete only w
   }
 });
 
-test('either single schedule endpoint remains deletable and delete clears the whole schedule', async () => {
+test('either single schedule endpoint remains eligible for deletion request without clearing schedule', async () => {
   for (const schedule of [{ startTime: '09:00', endTime: '' }, { startTime: '', endTime: '17:00' }]) {
     const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 2, schedule, attendance: null } });
     await page.context.load(false);
@@ -323,32 +461,31 @@ test('either single schedule endpoint remains deletable and delete clears the wh
     assert.equal(page.get('startTime').value, schedule.startTime);
     assert.equal(page.get('endTime').value, schedule.endTime);
     await page.get('deleteButton').handlers.click();
-    assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
-    assert.equal(page.requests.find((item) => item.action === 'shiftMutation').type, 'delete');
-    assert.equal(vm.runInContext('entryState.schedule', page.context), null);
-    assert.equal(vm.runInContext('entryState.attendance', page.context), null);
-    assert.equal(page.get('status').textContent, '削除しました。');
+    assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 0);
+    assert.equal(page.requests.find((item) => item.action === 'requestCreate').requestType, '削除申請');
+    assert.notEqual(vm.runInContext('entryState.schedule', page.context), null);
+    assert.equal(page.get('status').textContent, '削除申請を受け付けました。');
   }
 });
 
-test('schedule-only deletion clears schedule while attendance remains empty', async () => {
+test('schedule-only deletion request preserves the schedule until approval', async () => {
   const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: null } });
   await page.context.load(false);
   await page.get('deleteButton').handlers.click();
-  assert.match(page.confirmMessages[0], /シフト表を削除/);
-  assert.doesNotMatch(page.confirmMessages[0], /勤怠実績を削除/);
-  assert.equal(vm.runInContext('entryState.schedule', page.context), null);
+  assert.match(page.confirmMessages[0], /削除を申請/);
+  assert.equal(vm.runInContext('entryState.schedule.startTime', page.context), '09:00');
   assert.equal(vm.runInContext('entryState.attendance', page.context), null);
 });
 
-test('past and today saves update both records while future saves preserve actual-only data', async () => {
+test('past, today, and future corrections remain requests without changing displayed records', async () => {
   for (const dateClass of ['past', 'today']) {
     const page = makePage({ dateClass, initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
     await page.context.load(false);
     page.get('startTime').value = '09:00'; page.get('endTime').value = '17:00';
     await page.get('entryForm').handlers.submit({ preventDefault() {} });
-    assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.schedule', page.context))), { startTime: '09:00', endTime: '17:00' });
-    assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.attendance', page.context))), { startTime: '09:00', endTime: '17:00' });
+    assert.equal(vm.runInContext('entryState.schedule', page.context), null);
+    assert.equal(vm.runInContext('entryState.attendance', page.context), null);
+    assert.equal(page.requests.filter((request) => request.action === 'requestCreate').length, 1);
   }
   const priorAttendance = { startTime: '08:55', endTime: '17:05' };
   const future = makePage({ dateClass: 'future', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: priorAttendance } });
@@ -357,7 +494,7 @@ test('past and today saves update both records while future saves preserve actua
   assert.equal(future.get('endTime').value, priorAttendance.endTime);
   future.get('startTime').value = '10:00'; future.get('endTime').value = '18:00';
   await future.get('entryForm').handlers.submit({ preventDefault() {} });
-  assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.schedule', future.context))), { startTime: '10:00', endTime: '18:00' });
+  assert.equal(vm.runInContext('entryState.schedule', future.context), null);
   assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.attendance', future.context))), priorAttendance, 'future save leaves actual data unchanged');
 });
 
@@ -403,7 +540,7 @@ test('registered non-quarter-hour values are displayed and preserved without rou
   assert.equal(page.get('endTime').children.at(-1).textContent, '17:05（登録済み）');
   assert.equal(vm.runInContext("validTime('08:55') && validTime('17:05')", page.context), true);
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
-  let request = page.requests.find((item) => item.action === 'shiftMutation');
+  let request = page.requests.find((item) => item.action === 'requestCreate');
   assert.equal(request.startTime, '08:55');
   assert.equal(request.endTime, '17:05');
   assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('entryState.schedule', page.context))), { startTime: '08:55', endTime: '17:05' });
@@ -412,7 +549,7 @@ test('registered non-quarter-hour values are displayed and preserved without rou
   await oneSided.context.load(false);
   oneSided.get('startTime').value = '09:15';
   await oneSided.get('entryForm').handlers.submit({ preventDefault() {} });
-  request = oneSided.requests.find((item) => item.action === 'shiftMutation');
+  request = oneSided.requests.find((item) => item.action === 'requestCreate');
   assert.equal(request.startTime, '09:15');
   assert.equal(request.endTime, '17:05');
 });
@@ -495,47 +632,51 @@ test('manager retains non-quarter-hour values on save and on a one-sided edit', 
   assert.equal(request.endTime, '17:05');
 });
 
-test('overnight employee schedule continues to save and display with the next-day label', async () => {
+test('overnight employee schedule can be submitted for correction and stays unchanged until approval', async () => {
   const page = makePage({ dateClass: 'future', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: { startTime: '22:00', endTime: '02:00' }, attendance: null } });
   await page.context.load(false);
   assert.match(page.get('plannedTime').textContent, /22:00–02:00（翌日）/);
   page.get('startTime').value = '22:15'; page.get('endTime').value = '02:45';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
-  const request = page.requests.find((item) => item.action === 'shiftMutation');
+  const request = page.requests.find((item) => item.action === 'requestCreate');
   assert.equal(request.startTime, '22:15');
   assert.equal(request.endTime, '02:45');
-  assert.match(page.get('plannedTime').textContent, /22:15–02:45（翌日）/);
+  assert.match(page.get('plannedTime').textContent, /22:00–02:00（翌日）/);
 });
 
-test('a lost mutation response is resolved by rereading state without resending', async () => {
-  const page = makePage({ mutationFailure: 'after', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+test('a lost request response is reconciled by refreshing request list without resending', async () => {
+  const page = makePage({ requestFailure: 'after', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
   await page.context.load(false);
   page.get('startTime').value = '09:00';
   page.get('endTime').value = '17:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
-  assert.match(page.get('status').textContent, /保存結果を.*再取得で確認しました/);
-  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
+  assert.match(page.get('status').textContent, /申請結果を確認しました/);
+  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 0);
+  assert.equal(page.requests.filter((item) => item.action === 'requestCreate').length, 1);
+  assert.equal(page.get('requestStatusList').children.length, 1);
 });
 
-test('a mutation outcome is not confirmed from a different date selected during the request', async () => {
-  const page = makePage({ mutationFailure: 'after-switch', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+test('changing the date does not refetch request list and keeps request status visible', async () => {
+  const pending = { requestId: 'secret-uuid', workDate: '2026-10-05', startTime: '09:00', endTime: '17:00', requestType: '修正申請', status: '申請中' };
+  const page = makePage({ initialRequests: [pending], initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await page.context.load(false);
+  const before = page.requests.filter((item) => item.action === 'requestList').length;
+  page.get('workDate').value = '2026-10-06';
+  await page.get('workDate').handlers.change();
+  assert.equal(page.requests.filter((item) => item.action === 'requestList').length, before);
+  assert.equal(page.get('requestStatusList').children.length, 1);
+  assert.doesNotMatch(page.get('requestStatusList').children[0].textContent, /secret-uuid/);
+});
+
+test('an unresolved request is not retried and request list is refreshed', async () => {
+  const page = makePage({ requestFailure: 'before', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
   await page.context.load(false);
   page.get('startTime').value = '09:00';
   page.get('endTime').value = '17:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
-  assert.doesNotMatch(page.get('status').textContent, /再取得で確認しました/);
-  assert.match(page.get('connectionErrorMessage').textContent, /再保存せず/);
-  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
-});
-
-test('an unresolved mutation is not retried and reports the uncertain result', async () => {
-  const page = makePage({ mutationFailure: 'before', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
-  await page.context.load(false);
-  page.get('startTime').value = '09:00';
-  page.get('endTime').value = '17:00';
-  await page.get('entryForm').handlers.submit({ preventDefault() {} });
-  assert.match(page.get('connectionErrorMessage').textContent, /再保存せず/);
-  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
+  assert.match(page.get('status').textContent, /申請結果を確認しました/);
+  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 0);
+  assert.equal(page.requests.filter((item) => item.action === 'requestCreate').length, 1);
 });
 
 test('response for a different work date is rejected and does not populate the entry state', async () => {
@@ -555,36 +696,27 @@ test('DISABLED attendance response is shown as a stopped feature, not a connecti
   assert.equal(page.get('status').textContent, '機能が停止中です。');
 });
 
-test('DISABLED shift mutation is shown distinctly and never resends the mutation', async () => {
+test('request submission never invokes disabled shift mutation', async () => {
   const page = makePage({ disabledActions: ['shiftMutation'], initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 1, schedule: null, attendance: null } });
   await page.context.load(false);
   page.get('startTime').value = '09:00';
   page.get('endTime').value = '17:00';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
   assert.equal(page.get('connectionError').hidden, true);
-  assert.equal(page.get('status').textContent, '機能が停止中です。');
-  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1);
+  assert.equal(page.get('status').textContent, '修正申請を受け付けました。');
+  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 0);
   assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 1, 'only initial load fetches attendance state');
 });
 
-test('OUTCOME_UNKNOWN shows the safe GAS code, measures attendanceList recovery, and never replays mutation', async () => {
+test('employee request flow does not use shift mutation outcome or replay path', async () => {
   const page = makePage({ mutationFailure: 'outcome-unknown', diagnosticMode: true, dateClass: 'today', initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 2, schedule: { startTime: '09:00', endTime: '17:00' }, attendance: { startTime: '09:00', endTime: '17:00' } } });
   await page.context.load(false);
   page.get('startTime').value = '09:00';
   page.get('endTime').value = '17:15';
   await page.get('entryForm').handlers.submit({ preventDefault() {} });
-  assert.equal(page.get('status').textContent, '保存結果を再取得で確認しました。');
-  assert.match(page.get('traceOutput').textContent, /gas_outcome_diagnostic  情報  code post_state_mismatch/);
-  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 1, 'uncertain mutation is never resent');
-  assert.equal(page.requests.filter((item) => item.action === 'attendanceList').length, 2, 'initial load plus one outcome readback');
-  const performance = JSON.parse(page.get('savePerformanceOutput').textContent);
-  assert.equal(performance.outcome, 'confirmed_by_readback');
-  assert.equal(performance.gasDiagnosticCode, 'post_state_mismatch');
-  assert.equal(performance.recovery.action, 'attendanceList');
-  assert.equal(typeof performance.recovery.fetchMs, 'number');
-  assert.equal(typeof performance.recovery.responseParseMs, 'number');
-  assert.equal(typeof performance.recovery.uiUpdateMs, 'number');
-  assert.equal(performance.requestId, page.requests.find((item) => item.action === 'shiftMutation').requestId);
+  assert.equal(page.get('status').textContent, '修正申請を受け付けました。');
+  assert.equal(page.requests.filter((item) => item.action === 'shiftMutation').length, 0);
+  assert.equal(page.requests.filter((item) => item.action === 'requestList').length, 2);
 });
 
 test('DISABLED registration is reported as a definitive result', async () => {
@@ -617,7 +749,8 @@ test('initial work date and current employee controls stay in the existing atten
   }
   assert.match(html, /class="entry-actions"[^>]*>[\s\S]*id="saveButton"[\s\S]*id="deleteButton"/);
   assert.match(html, /\.entry-actions\{[^}]*display:flex[^}]*gap:20px/);
-  assert.match(html, /<button id="saveButton" type="submit">保存<\/button>/);
+  assert.match(html, /<button id="saveButton" type="submit">修正申請<\/button>/);
+  assert.match(html, /<button id="deleteButton" type="button">削除申請<\/button>/);
   assert.match(html, /<label>開始 /);
   assert.match(html, /<label>終了 /);
   assert.doesNotMatch(html, /id="shiftForm"/);

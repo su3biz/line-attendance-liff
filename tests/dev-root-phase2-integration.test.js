@@ -20,12 +20,18 @@ test('DEV root uses the current LIFF identity and one current DEV GAS endpoint',
   assert.match(script, /fetch\(GAS_URL,/);
 });
 
-test('root uses Phase 2 shift mutation and the existing attendance response model', () => {
+test('root keeps manager Phase 2 mutation and adds employee request API on the existing attendance model', () => {
   for (const id of ['entryCard', 'entryForm', 'startTime', 'endTime', 'saveButton', 'deleteButton']) {
     assert.match(html, new RegExp(`id=["']${id}["']`));
   }
   assert.match(script, /action:'shiftMutation'/);
   assert.match(script, /action:'attendanceList'/);
+  assert.match(script, /action:'requestCreate'/);
+  assert.match(script, /action:'requestList'/);
+  assert.match(script, /action:'requestCancel'/);
+  assert.match(script, /action:'requestApprove'/);
+  assert.match(script, /action:'requestReject'/);
+  assert.match(html, /<details id="managerRequestSection"/);
   assert.match(script, /entryState=\{/);
   assert.doesNotMatch(script, /action:'saveActual'/, 'the current UI saves through shiftMutation');
   assert.doesNotMatch(html, /id=["']shiftForm["']/);
