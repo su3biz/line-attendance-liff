@@ -283,7 +283,7 @@ async function refreshEmployeeRequests({quiet=false}={}){
 function renderManagerRequests(requests){
  managerRequestList.replaceChildren();
  const ordered=(Array.isArray(requests)?requests:[]).filter(row=>row&&typeof row.requestId==='string'&&row.requestId&&row.status==='申請中'&&['修正申請','削除申請'].includes(row.requestType)).sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate))||(Number(a.employeeOrder)||0)-(Number(b.employeeOrder)||0));
- managerRequestsCache=ordered;managerRequestCount.textContent=ordered.length+'件の申請があります。';
+ managerRequestsCache=ordered;managerRequestSection.hidden=ordered.length===0;managerRequestCount.textContent=ordered.length+'件の申請があります。';
  for(const request of ordered){
   const row=document.createElement('div');row.className='manager-request-row';row.dataset.managerRequestRow='true';row.dataset.requestId=request.requestId;
   const heading=document.createElement('div');heading.className='manager-request-heading';

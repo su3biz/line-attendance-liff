@@ -436,6 +436,18 @@ test('manager sees only pending requests with the matching count in a collapsibl
   assert.match(html,/<details id="managerRequestSection"/);
 });
 
+test('manager request accordion stays hidden with no pending requests on initial load and refresh', async () => {
+  const page=makePage({actorRole:'manager',initialRequests:[
+    {requestId:'56565656-5656-4565-8565-565656565656',workDate:'2026-11-03',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'却下',displayName:'田中',employeeOrder:1},
+  ]});
+  await page.context.load(false);
+  assert.equal(page.get('managerRequestSection').hidden,true);
+  assert.equal(page.get('managerRequestList').children.length,0);
+  assert.equal(page.get('managerRequestCount').textContent,'0件の申請があります。');
+  assert.equal(await page.context.refreshManagerRequests(),true);
+  assert.equal(page.get('managerRequestSection').hidden,true);
+});
+
 test('manager requests render in three rows and correction times reuse quarter-hour selects', async () => {
   const requests=[
     {requestId:'51515151-5151-4515-8515-515151515151',workDate:'2026-11-03',startTime:'08:07',endTime:'17:05',requestType:'修正申請',status:'申請中',displayName:'従業員03',employeeOrder:1},
@@ -467,6 +479,7 @@ test('manager edits correction date and times and approves through requestApprov
   await row.querySelector('[data-review-approve]').handlers.click();
   assert.deepEqual(page.requests.find((item)=>item.action==='requestApprove'),{id_token:'test-line-id-token',action:'requestApprove',requestId:'77777777-7777-4777-8777-777777777777',workDate:'2026-11-05',startTime:'10:15',endTime:'18:30'});
   assert.equal(page.get('managerRequestCount').textContent,'0件の申請があります。');
+  assert.equal(page.get('managerRequestSection').hidden,true);
   assert.equal(page.get('status').textContent,'申請を承認しました。');
 });
 
@@ -512,6 +525,7 @@ test('manager rejection calls requestReject and removes the request from pending
   await page.get('managerRequestList').children[0].querySelector('[data-review-reject]').handlers.click();
   assert.deepEqual(page.requests.find((item)=>item.action==='requestReject'),{id_token:'test-line-id-token',action:'requestReject',requestId:'99999999-9999-4999-8999-999999999999'});
   assert.equal(page.get('managerRequestCount').textContent,'0件の申請があります。');
+  assert.equal(page.get('managerRequestSection').hidden,true);
 });
 
 test('failed approval leaves request available for a manual retry', async () => {
