@@ -464,6 +464,8 @@ async function mutateEntry(type,operationStartedAt=monotonicNow()){
  let requestId;try{if(typeof crypto==='undefined'||typeof crypto.randomUUID!=='function')throw Error('安全な処理IDを生成できません。');requestId=crypto.randomUUID();}catch(err){status.textContent=err.message;return;}
  const saveDate=workDateInput.value,startTime=type==='delete'?'':startTimeInput.value,endTime=type==='delete'?'':endTimeInput.value;
  const measurement={requestId,action:type,operationStartedAt,apiStartedAt:monotonicNow(),fetchStartedAt:null,responseReceivedAt:null,fetchMs:null,responseParseMs:null,uiUpdateMs:null,server:null,outcome:'pending',gasDiagnosticCode:null,recovery:null};
+ // Invalidate any attendanceList request that started before this mutation.
+ ++requestSequence;
  busy=true;workDateInput.disabled=true;retry.disabled=true;applyWriteMode();setLoading(true,type==='delete'?'勤務情報を削除しています…':'勤務情報を保存しています…');let failure=null,successMessage='';
  try{
   let result=null;
@@ -472,7 +474,18 @@ async function mutateEntry(type,operationStartedAt=monotonicNow()){
    if(failure.code!=='AUTH_RECOVERY_NAVIGATING')showConnectionError(failure.code==='TOKEN_EXPIRED_RECOVERY_FAILED'?failure.message:messages.AUTHENTICATION_FAILED,failure.code);
    return;
   }
-  if(result){const updateStartedAt=monotonicNow();applyMutationResult(result,type,current,saveDate);measurement.uiUpdateMs=monotonicNow()-updateStartedAt;if(result.performance&&result.performance.requestId===requestId)measurement.server=result.performance;measurement.outcome='mutation_success';clearConnectionError();successMessage=type==='delete'?'削除しました。':'保存しました。';}
+  if(result){const updateStartedAt=monotonicNow();applyMutationResult(result,type,current,saveDate);measurement.uiUpdateMs=monotonicNow()-updateStartedAt;if(result.performance&&result.performance.requestId===requestId)measurement.server=result.performance;measurement.outcome='mutation_success';clearConnectionError();successMessage=type==='delete'?'削除しました。':'保存しました。';
+   // A successful mutation response is not the canonical list response. Reconcile
+   // once, but only adopt a matching row so stale/empty reads cannot undo success.
+   const reconciliationSequence=++requestSequence,readbackMeasurement={requestId,fetchStartedAt:null,responseReceivedAt:null,fetchMs:null,responseParseMs:null,uiUpdateMs:null};
+   try{
+    const canonical=await api({action:'attendanceList',workDate:saveDate},'readback',readbackMeasurement);
+    if(reconciliationSequence===requestSequence&&workDateInput.value===saveDate&&canonical.workDate===saveDate&&canonical.actorRole==='manager'&&Array.isArray(canonical.records)){
+     const row=canonical.records.find(item=>item&&item.targetActorId===current.employeeId),matches=type==='delete'?(row&&row.revision>=result.revision&&!row.schedule&&!row.attendance):(row&&row.revision>=result.revision&&row.schedule&&row.schedule.startTime===startTime&&row.schedule.endTime===endTime&&(dateClass==='future'?JSON.stringify(row.attendance)===JSON.stringify(current.attendance):row.attendance&&row.attendance.startTime===startTime&&row.attendance.endTime===endTime));
+     if(matches&&selectedManagerEmployeeId===current.employeeId){const reconcileStartedAt=monotonicNow();renderManagerRecords(canonical.records);measurement.recovery={action:'attendanceList',fetchMs:readbackMeasurement.fetchMs,responseParseMs:readbackMeasurement.responseParseMs,uiUpdateMs:monotonicNow()-reconcileStartedAt};}
+    }
+   }catch(_){/* Keep the successful mutation response as the visible fallback. */}
+  }
   else if(failure&&(!failure.code||['OUTCOME_UNKNOWN','ROLLBACK_FAILED','UNAVAILABLE','SAVE_UNKNOWN','TRANSPORT_ERROR'].includes(failure.code))){
    measurement.outcome=failure.code==='OUTCOME_UNKNOWN'?'outcome_unknown':'transport_or_rollback_uncertain';
    if(failure.code==='OUTCOME_UNKNOWN'&&failure.result&&SHIFT_MUTATION_DIAGNOSTIC_CODES.has(failure.result.diagnosticCode))measurement.gasDiagnosticCode=failure.result.diagnosticCode;

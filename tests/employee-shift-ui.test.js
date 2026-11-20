@@ -865,6 +865,48 @@ test('manager save and delete target the selected record ID rather than its disp
   assert.equal(request.type,'delete');assert.equal(request.employeeId,'EMP-04');
 });
 
+test('manager create reconciles the card from one canonical readback and enables deletion', async () => {
+  const row={employeeId:'EMP-NEW',targetActorId:'EMP-NEW',displayName:'新規従業員',workDate:'2026-10-05',revision:0,stateToken:'a'.repeat(64),schedule:null,attendance:null};
+  const page=makePage({actorRole:'manager',dateClass:'future',attendanceRecords:[row]});
+  vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true',page.context);
+  page.context.render({actorRole:'manager',dateClass:'future',records:[row]});
+  const form=page.get('list').children[0].children[4];form.children[0].children[1].value='09:00';form.children[1].children[1].value='17:00';
+  await form.children[2].children[0].children[0].handlers.click();
+  const card=page.get('list').children[0];
+  assert.equal(page.requests.filter(item=>item.action==='attendanceList').length,1,'exactly one post-save canonical readback');
+  assert.equal(card.dataset.hasValues,'true');
+  assert.match(card.children[2].textContent,/09:00–17:00/);
+  assert.equal(card.querySelector('[data-manager-delete]').disabled,false);
+  assert.equal(vm.runInContext('entryState.employeeId',page.context),'EMP-NEW');
+});
+
+test('manager save keeps the successful mutation display when canonical readback fails', async () => {
+  const row={employeeId:'EMP-NEW',targetActorId:'EMP-NEW',displayName:'新規従業員',workDate:'2026-10-05',revision:0,stateToken:'a'.repeat(64),schedule:null,attendance:null};
+  const page=makePage({actorRole:'manager',dateClass:'future',attendanceRecords:[row],disabledActions:['attendanceList']});
+  vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true',page.context);
+  page.context.render({actorRole:'manager',dateClass:'future',records:[row]});
+  const form=page.get('list').children[0].children[4];form.children[0].children[1].value='09:00';form.children[1].children[1].value='17:00';
+  await form.children[2].children[0].children[0].handlers.click();
+  const card=page.get('list').children[0];
+  assert.equal(page.requests.filter(item=>item.action==='attendanceList').length,1);
+  assert.equal(card.dataset.hasValues,'true');
+  assert.equal(card.querySelector('[data-manager-delete]').disabled,false);
+  assert.equal(page.get('status').textContent,'保存しました。');
+});
+
+test('empty canonical response cannot erase the successful new-entry card', async () => {
+  const row={employeeId:'EMP-NEW',targetActorId:'EMP-NEW',displayName:'新規従業員',workDate:'2026-10-05',revision:0,stateToken:'a'.repeat(64),schedule:null,attendance:null};
+  const page=makePage({actorRole:'manager',dateClass:'future',attendanceRecords:[row],attendanceRecordsByDate:{'2026-10-05':[]}});
+  vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true',page.context);
+  page.context.render({actorRole:'manager',dateClass:'future',records:[row]});
+  const form=page.get('list').children[0].children[4];form.children[0].children[1].value='09:00';form.children[1].children[1].value='17:00';
+  await form.children[2].children[0].children[0].handlers.click();
+  assert.equal(page.get('list').children.length,1);
+  assert.equal(page.get('list').children[0].dataset.hasValues,'true');
+  assert.equal(page.get('list').children[0].querySelector('[data-manager-delete]').disabled,false);
+  assert.equal(vm.runInContext('entryState.schedule.startTime',page.context),'09:00');
+});
+
 test('manager date reload keeps selected employee when available and falls back to the new first employee otherwise', async () => {
   const a=managerRow('EMP-A','従業員A','2026-10-05'),b=managerRow('EMP-B','従業員B','2026-10-05','10:00','18:00');
   const bNext=managerRow('EMP-B','従業員B','2026-10-06','11:00','19:00'),cNext=managerRow('EMP-C','従業員C','2026-10-06','12:00','20:00');
