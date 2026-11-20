@@ -904,7 +904,7 @@ test('employee view hides the manager-only selector and preserves the employee r
   assert.match(html,/\.request-status summary\{cursor:pointer;font-weight:600;list-style:disclosure-closed\}/);
   assert.doesNotMatch(html,/\.request-status summary\{[^}]*border:1px solid/);
   assert.match(html,/#workControls input\[type=date\]\{box-sizing:border-box;flex:0 0 160px;width:160px;min-width:160px/);
-  assert.match(html,/#managerEmployeeLabel:not\(\[hidden\]\)\{width:100%;padding-left:8px\}/);
+  assert.match(html,/#managerEmployeeLabel:not\(\[hidden\]\)\{width:100%;padding-left:0\}/);
   assert.equal(page.get('entryCard').hidden,false);
 });
 
