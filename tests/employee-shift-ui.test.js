@@ -454,6 +454,9 @@ test('manager requests render in three rows and correction times reuse quarter-h
   assert.deepEqual(correction.children[2].children.map(child=>child.className),['save-action','delete-action']);
   assert.equal(deletion.children.length,3);assert.equal(deletion.children[0].children[0].textContent,'従業員04');assert.equal(deletion.querySelector('[data-review-start]'),null);assert.equal(deletion.querySelector('[data-review-end]'),null);
   assert.equal(deletion.querySelector('[data-review-read-only-times]').textContent,'08:55 ～ 17:05');
+  assert.match(html,/\.manager-request-row\{display:grid;gap:12px/);
+  assert.match(html,/\.manager-request-actions \.save-action button,\.manager-request-actions \.delete-action button\{width:120px;min-width:120px\}/);
+  assert.match(html,/\.manager-request-fields \[data-review-read-only-times\]\{white-space:nowrap;color:#202b26\}/);
 });
 
 test('manager edits correction date and times and approves through requestApprove', async () => {
@@ -898,6 +901,10 @@ test('employee view hides the manager-only selector and preserves the employee r
   assert.equal(page.get('managerEmployeeLabel').hidden,true);
   assert.equal(page.get('requestStatusSection').hidden,false);
   assert.equal(page.get('requestStatusList').children.length,1);
+  assert.match(html,/\.request-status summary\{cursor:pointer;font-weight:600;list-style:disclosure-closed\}/);
+  assert.doesNotMatch(html,/\.request-status summary\{[^}]*border:1px solid/);
+  assert.match(html,/#workControls input\[type=date\]\{box-sizing:border-box;flex:0 0 160px;width:160px;min-width:160px/);
+  assert.match(html,/#managerEmployeeLabel:not\(\[hidden\]\)\{width:100%;padding-left:8px\}/);
   assert.equal(page.get('entryCard').hidden,false);
 });
 
