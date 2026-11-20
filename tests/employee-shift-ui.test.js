@@ -61,7 +61,7 @@ function makePage({ initialState, confirm = true, mutationFailure = null, reques
     },
     location, URL, URLSearchParams, Error, AbortController, Set, Intl, Date,
     setTimeout, clearTimeout,
-    crypto: { randomUUID: () => `request-${String(++id).padStart(4, '0')}` },
+    crypto: { randomUUID: () => `request-${String(++id).padStart(4, '0')}`, getRandomValues: (bytes) => { bytes.set([1,2,3,4,5,6]); return bytes; } },
     liff: {
       isLoggedIn: () => true,
       isInClient: () => true,
@@ -107,12 +107,13 @@ function makePage({ initialState, confirm = true, mutationFailure = null, reques
         if (requestFailure === 'cancel-before') throw new Error('simulated cancellation failure');
         const index = employeeRequests.findIndex((request) => request.requestId === fields.requestId);
         if (index < 0) return { ok: true, json: async () => ({ ok: false, code: 'REQUEST_NOT_FOUND' }) };
+        if (requestFailure === 'cancel-remains') return { ok: true, json: async () => ({ ok: false, code: 'REQUEST_STORAGE_UNAVAILABLE', diagnosticCode: 'DELETE_REMAINS', diagnosticId: fields.diagnosticId }) };
         employeeRequests.splice(index, 1);
         if (requestFailure === 'cancel-after') throw new Error('simulated lost cancellation response');
-        return { ok: true, json: async () => ({ ok: true }) };
+        return { ok: true, json: async () => ({ ok: true, diagnosticCode: 'DELETE_CONFIRMED', diagnosticId: fields.diagnosticId }) };
       }
       if (fields.action === 'requestApprove') {
-        if (approveFailure) return { ok: true, json: async () => ({ ok: false, code: approveFailure }) };
+        if (approveFailure) {const code=typeof approveFailure==='string'?approveFailure:approveFailure.code;return { ok: true, json: async () => ({ ok: false, code, diagnosticCode: typeof approveFailure==='object'?approveFailure.diagnosticCode:undefined, diagnosticId: fields.diagnosticId }) };}
         const index=employeeRequests.findIndex((request)=>request.requestId===fields.requestId);if(index>=0)employeeRequests.splice(index,1);
         return { ok: true, json: async () => ({ ok: true, code: 'APPROVED', requestId: fields.requestId }) };
       }
@@ -307,6 +308,28 @@ test('unknown cancellation result refreshes requests and confirms when UUID is g
   assert.equal(page.requests.filter((request) => request.action === 'requestCancel').length, 1);
 });
 
+test('DEV diagnostic mode attaches only a short correlation id and records cancellation trace without identifiers', async () => {
+  const page = makePage({ diagnosticMode: true, initialRequests: [{ requestId: '44444444-4444-4444-8444-444444444444', workDate: '2026-10-05', startTime: '', endTime: '', requestType: '削除申請', status: '申請中' }], initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 0, schedule: null, attendance: null } });
+  await page.context.load(false);await page.get('requestStatusList').children[0].children[1].handlers.click();
+  const sent=page.requests.find((request)=>request.action==='requestCancel');
+  assert.equal(sent.diagnosticId,'010203040506');
+  assert.equal(sent.requestId,'44444444-4444-4444-8444-444444444444');
+  const output=page.get('traceOutput').textContent;
+  assert.match(output,/request_operation/);assert.match(output,/DELETE_CONFIRMED/);assert.match(output,/request_cancel_list_refresh/);assert.match(output,/010203040506/);
+  assert.doesNotMatch(output,/44444444-4444-4444-8444-444444444444|test-line-id-token/);
+  assert.equal(page.requests.filter((request)=>request.action==='requestCancel').length,1);
+});
+
+test('cancellation row-remains response refreshes once and never resends the destructive request', async () => {
+  const page=makePage({requestFailure:'cancel-remains',initialRequests:[{requestId:'45454545-4545-4545-8545-454545454545',workDate:'2026-10-05',startTime:'09:00',endTime:'17:00',requestType:'削除申請',status:'申請中'}],initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,schedule:null,attendance:null}});
+  await page.context.load(false);const beforeList=page.requests.filter((request)=>request.action==='requestList').length;
+  await page.get('requestStatusList').children[0].children[1].handlers.click();
+  assert.equal(page.requests.filter((request)=>request.action==='requestCancel').length,1);
+  assert.equal(page.requests.filter((request)=>request.action==='requestList').length,beforeList+1);
+  assert.equal(page.get('requestStatusList').children.length,1);
+  assert.match(page.get('status').textContent,/取消し結果を確認できません/);
+});
+
 test('manager sees only pending requests with the matching count in a collapsible section', async () => {
   const page=makePage({actorRole:'manager',initialRequests:[
     {requestId:'55555555-5555-4555-8555-555555555555',workDate:'2026-11-03',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'申請中',displayName:'田中',employeeOrder:1},
@@ -330,6 +353,17 @@ test('manager edits correction date and times and approves through requestApprov
   assert.deepEqual(page.requests.find((item)=>item.action==='requestApprove'),{id_token:'test-line-id-token',action:'requestApprove',requestId:'77777777-7777-4777-8777-777777777777',workDate:'2026-11-05',startTime:'10:15',endTime:'18:30'});
   assert.equal(page.get('managerRequestCount').textContent,'0件の申請があります。');
   assert.equal(page.get('status').textContent,'申請を承認しました。');
+});
+
+test('DEV approval failure carries only correlation and fixed diagnostic code, refreshes list, and is not resent', async () => {
+  const request={requestId:'78787878-7878-4787-8787-787878787878',workDate:'2026-11-03',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'申請中',displayName:'田中',employeeOrder:1};
+  const page=makePage({diagnosticMode:true,actorRole:'manager',approveFailure:{code:'APPROVAL_SAVED_REQUEST_REMAINS',diagnosticCode:'APPROVAL_REQUEST_READBACK_FAILED'},initialRequests:[request]});
+  await page.context.load(false);const row=page.get('managerRequestList').children[0];await row.querySelector('[data-review-approve]').handlers.click();
+  const sent=page.requests.find((item)=>item.action==='requestApprove');assert.equal(sent.diagnosticId,'010203040506');
+  assert.equal(page.requests.filter((item)=>item.action==='requestApprove').length,1);
+  assert.equal(page.get('managerRequestCount').textContent,'1件の申請があります。');
+  const output=page.get('traceOutput').textContent;assert.match(output,/APPROVAL_REQUEST_READBACK_FAILED/);assert.match(output,/010203040506/);
+  assert.doesNotMatch(output,/78787878-7878-4787-8787-787878787878|test-line-id-token/);
 });
 
 test('manager deletion approval edits only date and sends snapshot times unchanged', async () => {
