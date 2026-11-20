@@ -11,7 +11,7 @@ assert.ok(match, 'inline LIFF script exists');
 
 function element() {
   return {
-    value: '', textContent: '', type: '', required: false, disabled: false, hidden: false,
+    value: '', textContent: '', type: '', required: false, disabled: false, hidden: false, open: false,
     children: [], handlers: {}, attributes: {}, dataset: {}, className: '', blurCount: 0, classList: { add() {}, remove() {} },
     addEventListener(name, handler) { this.handlers[name] = handler; },
     blur() { this.blurCount++; },
@@ -28,7 +28,7 @@ function matches(node,selector){if(selector==='p')return node.tagName==='p';if(s
 function selectValues(select) { return select.children.map((option) => option.value); }
 function quarterHourValues() { return Array.from({ length: 96 }, (_unused, index) => `${String(Math.floor(index / 4)).padStart(2, '0')}:${String((index % 4) * 15).padStart(2, '0')}`); }
 
-function makePage({ initialState, confirm = true, mutationFailure = null, requestFailure = null, approveFailure = null, rejectFailure = null, responseWorkDate = null, dateClass = 'future', actorRole = 'employee', disabledActions = [], shiftWritesEnabled = true, attendanceWritesEnabled = true, attendanceRecords = [], diagnosticMode = false, initialRequests = [], duplicateRequest = false } = {}) {
+function makePage({ initialState, confirm = true, mutationFailure = null, requestFailure = null, approveFailure = null, rejectFailure = null, responseWorkDate = null, dateClass = 'future', actorRole = 'employee', disabledActions = [], shiftWritesEnabled = true, attendanceWritesEnabled = true, attendanceRecords = [], attendanceRecordsByDate = {}, attendanceListGates = {}, diagnosticMode = false, initialRequests = [], duplicateRequest = false } = {}) {
   const elements = new Map();
   const requests = [];
   const employeeRequests = initialRequests.map((request) => ({ ...request }));
@@ -39,6 +39,9 @@ function makePage({ initialState, confirm = true, mutationFailure = null, reques
     if (!elements.has(name)) elements.set(name, element());
     return elements.get(name);
   };
+  const requestStatusSection=get('requestStatusSection'),requestStatusToggle=get('requestStatusToggle');
+  requestStatusSection.tagName='details';requestStatusToggle.tagName='summary';
+  requestStatusToggle.addEventListener('click',()=>{requestStatusSection.open=!requestStatusSection.open;});
   const nextState = { stateToken: 'a'.repeat(64), ...initialState };
   const currentRecords = attendanceRecords.map((record) => ({ ...record, schedule: record.schedule && { ...record.schedule }, attendance: record.attendance && { ...record.attendance } }));
   const location = { href: diagnosticMode ? 'https://example.test/liff?debug=1' : 'https://example.test/liff', search: diagnosticMode ? '?debug=1' : '', reload() {} };
@@ -124,10 +127,12 @@ function makePage({ initialState, confirm = true, mutationFailure = null, reques
       }
       if (fields.action === 'attendanceList') {
         if (disabledActions.includes('attendanceList')) return { ok: true, json: async () => ({ ok: false, code: 'DISABLED' }) };
+        if (attendanceListGates[fields.workDate]) await attendanceListGates[fields.workDate];
+        const responseRecords = attendanceRecordsByDate[fields.workDate] || currentRecords;
         return {
           ok: true,
           json: async () => ({
-            ok: true, records: currentRecords, actorRole, workDate: responseWorkDate || fields.workDate,
+            ok: true, records: responseRecords.map((record) => ({ ...record, schedule: record.schedule && { ...record.schedule }, attendance: record.attendance && { ...record.attendance }, workDate: fields.workDate })), actorRole, workDate: responseWorkDate || fields.workDate,
             dateClass, selfShift: nextState, shiftWritesEnabled, attendanceWritesEnabled,
           }),
         };
@@ -251,6 +256,92 @@ test('request list shows pending and rejected requests in target date order with
   assert.match(rows[1].children[0].textContent, /11\/08 削除申請が却下/);
   assert.equal(rows[0].children[1].dataset.requestId, '22222222-2222-4222-8222-222222222222');
   assert.doesNotMatch(rows[0].children[0].textContent, /22222222-2222-4222-8222-222222222222/);
+  assert.equal(page.get('requestStatusSection').hidden,false);
+  assert.equal(page.get('requestStatusSection').open,false);
+});
+
+test('employee申請状況 is hidden when the本人 request list is empty', async () => {
+  const page=makePage({initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,schedule:null,attendance:null}});
+  await page.context.load(false);
+  assert.equal(page.get('requestStatusSection').hidden,true);
+  assert.equal(page.get('requestStatusList').children.length,0);
+});
+
+test('employee request accordion appears for one or more requests and starts closed', async () => {
+  for(const requests of [
+    [{requestId:'a',workDate:'2026-10-05',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'申請中'}],
+    [
+      {requestId:'a',workDate:'2026-10-05',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'申請中'},
+      {requestId:'b',workDate:'2026-10-06',startTime:'',endTime:'',requestType:'削除申請',status:'却下'},
+    ],
+  ]){
+    const page=makePage({initialRequests:requests,initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,schedule:null,attendance:null}});
+    await page.context.load(false);
+    assert.equal(page.get('requestStatusSection').hidden,false);
+    assert.equal(page.get('requestStatusSection').tagName,'details');
+    assert.equal(page.get('requestStatusSection').open,false);
+    assert.equal(page.get('requestStatusList').children.length,requests.length);
+  }
+  assert.match(html,/<details id="requestStatusSection"[^>]*hidden><summary id="requestStatusToggle">申請状況<\/summary>/);
+});
+
+test('employee request summary toggles the native disclosure state', async () => {
+  const page=makePage({initialRequests:[{requestId:'a',workDate:'2026-10-05',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'申請中'}],initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,schedule:null,attendance:null}});
+  await page.context.load(false);
+  await page.get('requestStatusToggle').handlers.click();
+  assert.equal(page.get('requestStatusSection').open,true);
+  await page.get('requestStatusToggle').handlers.click();
+  assert.equal(page.get('requestStatusSection').open,false);
+});
+
+test('adding the first request reveals a closed accordion without a page reload', async () => {
+  const page=makePage({initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,schedule:null,attendance:null}});
+  await page.context.load(false);
+  assert.equal(page.get('requestStatusSection').hidden,true);
+  page.get('startTime').value='09:00';page.get('endTime').value='17:00';
+  await page.get('entryForm').handlers.submit({preventDefault(){}});
+  assert.equal(page.get('requestStatusSection').hidden,false);
+  assert.equal(page.get('requestStatusSection').open,false);
+  assert.equal(page.get('requestStatusList').children.length,1);
+});
+
+test('canceling the last request hides and closes the accordion', async () => {
+  const page=makePage({initialRequests:[{requestId:'a',workDate:'2026-10-05',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'申請中'}],initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,schedule:null,attendance:null}});
+  await page.context.load(false);
+  await page.get('requestStatusToggle').handlers.click();
+  await page.get('requestStatusList').children[0].children[1].handlers.click();
+  assert.equal(page.get('requestStatusList').children.length,0);
+  assert.equal(page.get('requestStatusSection').hidden,true);
+  assert.equal(page.get('requestStatusSection').open,false);
+});
+
+test('cancel button remains usable while an open accordion refreshes with remaining requests', async () => {
+  const page=makePage({initialRequests:[
+    {requestId:'a',workDate:'2026-10-05',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'申請中'},
+    {requestId:'b',workDate:'2026-10-06',startTime:'',endTime:'',requestType:'削除申請',status:'申請中'},
+  ],initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,schedule:null,attendance:null}});
+  await page.context.load(false);
+  await page.get('requestStatusToggle').handlers.click();
+  await page.get('requestStatusList').children[0].children[1].handlers.click();
+  assert.equal(page.requests.filter(request=>request.action==='requestCancel').length,1);
+  assert.equal(page.get('requestStatusSection').hidden,false);
+  assert.equal(page.get('requestStatusSection').open,true);
+  assert.equal(page.get('requestStatusList').children.length,1);
+});
+
+test('failed request list refresh does not treat a cached request as zero requests', async () => {
+  const page=makePage({initialRequests:[{requestId:'a',workDate:'2026-10-05',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'申請中'}],initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,schedule:null,attendance:null}});
+  await page.context.load(false);
+  const originalFetch=page.context.fetch;
+  page.context.fetch=async(url,options)=>{
+    const fields=Object.fromEntries(new URLSearchParams(options.body).entries());
+    if(fields.action==='requestList')throw new Error('simulated request list failure');
+    return originalFetch(url,options);
+  };
+  assert.equal(await page.context.refreshEmployeeRequests({quiet:false}),false);
+  assert.equal(page.get('requestStatusSection').hidden,false);
+  assert.equal(page.get('requestStatusList').children.length,1);
+  assert.equal(page.get('status').textContent,'simulated request list failure');
 });
 
 test('duplicate request displays a clear message and does not send direct shift mutation', async () => {
@@ -336,12 +427,33 @@ test('manager sees only pending requests with the matching count in a collapsibl
     {requestId:'66666666-6666-4666-8666-666666666666',workDate:'2026-11-04',startTime:'10:00',endTime:'18:00',requestType:'削除申請',status:'却下',displayName:'佐藤',employeeOrder:2},
   ]});
   await page.context.load(false);
+  assert.equal(page.get('requestStatusSection').hidden,true);
   assert.equal(page.get('managerRequestSection').hidden,false);
   assert.equal(page.get('managerRequestCount').textContent,'1件の申請があります。');
   assert.equal(page.get('managerRequestList').children.length,1);
   assert.equal(page.get('managerRequestList').children[0].children[0].children[0].textContent,'田中');
   assert.equal(page.get('managerRequestSection').tagName,undefined); // native <details> uses the existing disclosure behavior
   assert.match(html,/<details id="managerRequestSection"/);
+});
+
+test('manager requests render in three rows and correction times reuse quarter-hour selects', async () => {
+  const requests=[
+    {requestId:'51515151-5151-4515-8515-515151515151',workDate:'2026-11-03',startTime:'08:07',endTime:'17:05',requestType:'修正申請',status:'申請中',displayName:'従業員03',employeeOrder:1},
+    {requestId:'52525252-5252-4525-8525-525252525252',workDate:'2026-11-04',startTime:'08:55',endTime:'17:05',requestType:'削除申請',status:'申請中',displayName:'従業員04',employeeOrder:2},
+  ];
+  const page=makePage({actorRole:'manager',initialRequests:requests});await page.context.load(false);
+  const correction=page.get('managerRequestList').children[0],deletion=page.get('managerRequestList').children[1];
+  assert.equal(correction.children.length,3);assert.deepEqual(correction.children.map(child=>child.className),['manager-request-heading','manager-request-fields','manager-request-actions']);
+  assert.equal(correction.children[0].children[0].textContent,'従業員03');assert.equal(correction.children[0].children[1].textContent,'修正申請');
+  const date=correction.querySelector('[data-review-date]'),start=correction.querySelector('[data-review-start]'),end=correction.querySelector('[data-review-end]');
+  assert.equal(start.tagName,'select');assert.equal(end.tagName,'select');
+  assert.equal(start.value,'08:07');assert.equal(end.value,'17:05');
+  assert.equal(selectValues(start).includes('00:00'),true);assert.equal(selectValues(start).includes('00:15'),true);assert.equal(selectValues(start).includes('23:45'),true);
+  assert.equal(selectValues(start).at(-1),'08:07');assert.equal(selectValues(end).at(-1),'17:05');
+  assert.equal(correction.children[1].children[0],date);assert.equal(correction.children[1].children[1],start);assert.equal(correction.children[1].children[3],end);
+  assert.deepEqual(correction.children[2].children.map(child=>child.className),['save-action','delete-action']);
+  assert.equal(deletion.children.length,3);assert.equal(deletion.children[0].children[0].textContent,'従業員04');assert.equal(deletion.querySelector('[data-review-start]'),null);assert.equal(deletion.querySelector('[data-review-end]'),null);
+  assert.equal(deletion.querySelector('[data-review-read-only-times]').textContent,'08:55 ～ 17:05');
 });
 
 test('manager edits correction date and times and approves through requestApprove', async () => {
@@ -678,6 +790,115 @@ test('manager retains non-quarter-hour values on save and on a one-sided edit', 
   request = edited.requests.find((item) => item.action === 'shiftMutation');
   assert.equal(request.startTime, '09:15');
   assert.equal(request.endTime, '17:05');
+});
+
+function managerRow(id, name, date='2026-10-05', start='09:00', end='17:00') {
+  return { employeeId: id, targetActorId: id, attendanceEmployeeId: `ATT-${id}`, displayName: name, workDate: date, revision: 1, stateToken: 'f'.repeat(64), schedule: { startTime: start, endTime: end }, attendance: null };
+}
+
+test('manager employee selector uses authorized record order and displays only the first employee initially', async () => {
+  const rows=[managerRow('TEST-B','従業員03'),managerRow('EMP-04','従業員04','2026-10-05','10:00','18:00')];
+  const page=makePage({actorRole:'manager',attendanceRecords:rows});
+  await page.context.load();
+  const selector=page.get('managerEmployeeSelect');
+  assert.equal(page.get('managerEmployeeLabel').hidden,false);
+  assert.deepEqual(selector.children.map(option=>[option.value,option.textContent]),[['TEST-B','従業員03'],['EMP-04','従業員04']]);
+  assert.equal(selector.value,'TEST-B');
+  assert.equal(page.get('list').children.length,1);
+  assert.equal(page.get('list').children[0].dataset.managerEmployeeId,'TEST-B');
+  assert.equal(page.get('status').textContent,'従業員03の勤務情報を表示しています。');
+  assert.match(html,/<div id="workControls">\s*<label class="muted">勤怠日[\s\S]*?<label id="managerEmployeeLabel"/);
+});
+
+test('manager selection switches the single editor by employee ID without changing the date or sending a write', async () => {
+  const rows=[managerRow('TEST-B','従業員03'),managerRow('EMP-04','従業員04','2026-10-05','10:00','18:00')];
+  const page=makePage({actorRole:'manager',attendanceRecords:rows});
+  await page.context.load(false);
+  const selector=page.get('managerEmployeeSelect');
+  selector.value='EMP-04';selector.handlers.change();
+  assert.equal(page.get('workDate').value,'2026-10-05');
+  assert.equal(page.get('list').children.length,1);
+  assert.equal(page.get('list').children[0].dataset.managerEmployeeId,'EMP-04');
+  assert.equal(page.get('list').children[0].children[0].textContent,'従業員04');
+  assert.equal(vm.runInContext('entryState.employeeId',page.context),'EMP-04');
+  assert.equal(page.requests.filter(item=>item.action==='shiftMutation').length,0);
+});
+
+test('manager save and delete target the selected record ID rather than its display name or position', async () => {
+  const rows=[managerRow('TEST-B','従業員03'),managerRow('EMP-04','従業員04','2026-10-05','10:00','18:00')];
+  const page=makePage({actorRole:'manager',attendanceRecords:rows});
+  vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true',page.context);
+  await page.context.load(false);
+  page.get('managerEmployeeSelect').value='EMP-04';page.get('managerEmployeeSelect').handlers.change();
+  let form=page.get('list').children[0].children[4];
+  form.children[0].children[1].value='10:15';form.children[1].children[1].value='18:15';
+  await form.children[2].children[0].children[0].handlers.click();
+  let request=page.requests.find(item=>item.action==='shiftMutation');
+  assert.equal(request.employeeId,'EMP-04');assert.equal(request.workDate,'2026-10-05');
+  assert.equal(request.startTime,'10:15');assert.equal(request.endTime,'18:15');
+
+  const deleteRow=managerRow('EMP-04','従業員04','2026-10-05','10:00','18:00');
+  const deletePage=makePage({actorRole:'manager',attendanceRecords:[rows[0],deleteRow]});
+  vm.runInContext('shiftWritesEnabled=true;attendanceWritesEnabled=true',deletePage.context);
+  await deletePage.context.load(false);
+  deletePage.get('managerEmployeeSelect').value='EMP-04';deletePage.get('managerEmployeeSelect').handlers.change();
+  form=deletePage.get('list').children[0].children[4];
+  await form.children[2].children[1].children[0].handlers.click();
+  request=deletePage.requests.find(item=>item.action==='shiftMutation');
+  assert.equal(request.type,'delete');assert.equal(request.employeeId,'EMP-04');
+});
+
+test('manager date reload keeps selected employee when available and falls back to the new first employee otherwise', async () => {
+  const a=managerRow('EMP-A','従業員A','2026-10-05'),b=managerRow('EMP-B','従業員B','2026-10-05','10:00','18:00');
+  const bNext=managerRow('EMP-B','従業員B','2026-10-06','11:00','19:00'),cNext=managerRow('EMP-C','従業員C','2026-10-06','12:00','20:00');
+  const cLast=managerRow('EMP-C','従業員C','2026-10-07','13:00','21:00');
+  const page=makePage({actorRole:'manager',attendanceRecords:[a,b],attendanceRecordsByDate:{'2026-10-06':[bNext,cNext],'2026-10-07':[cLast]}});
+  await page.context.load(false);
+  page.get('managerEmployeeSelect').value='EMP-B';page.get('managerEmployeeSelect').handlers.change();
+  let pendingLoad;const originalLoad=page.context.load;page.context.load=(...args)=>{pendingLoad=originalLoad(...args);return pendingLoad;};
+  page.get('workDate').value='2026-10-06';page.get('workDate').handlers.change();await pendingLoad;
+  assert.equal(page.get('managerEmployeeSelect').value,'EMP-B');
+  assert.equal(page.get('list').children[0].dataset.managerEmployeeId,'EMP-B');
+  assert.equal(page.get('list').children[0].children[2].textContent,'予定: 11:00–19:00');
+  page.get('workDate').value='2026-10-07';page.get('workDate').handlers.change();await pendingLoad;
+  assert.equal(page.get('managerEmployeeSelect').value,'EMP-C');
+  assert.equal(page.get('list').children[0].dataset.managerEmployeeId,'EMP-C');
+});
+
+test('manager with no managed employees sees a disabled selector and no editor block', async () => {
+  const page=makePage({actorRole:'manager',attendanceRecords:[]});
+  await page.context.load(false);
+  assert.equal(page.get('managerEmployeeLabel').hidden,false);
+  assert.equal(page.get('managerEmployeeSelect').disabled,true);
+  assert.equal(page.get('managerEmployeeSelect').children.length,0);
+  assert.equal(page.get('list').children.length,0);
+  assert.equal(page.get('list').textContent,'管理対象の従業員はいません。');
+  assert.equal(vm.runInContext('entryState',page.context),null);
+});
+
+test('late attendance response for an older date cannot overwrite the current manager selection', async () => {
+  let releaseOld;
+  const oldGate=new Promise(resolve=>{releaseOld=resolve;});
+  const oldRow=managerRow('EMP-OLD','旧日従業員','2026-10-05');
+  const newRow=managerRow('EMP-NEW','新日従業員','2026-10-06','10:00','18:00');
+  const page=makePage({actorRole:'manager',attendanceRecordsByDate:{'2026-10-05':[oldRow],'2026-10-06':[newRow]},attendanceListGates:{'2026-10-05':oldGate}});
+  const oldLoad=page.context.load(false);
+  page.get('workDate').value='2026-10-06';
+  await page.context.load(false);
+  releaseOld();await oldLoad;
+  assert.equal(page.get('workDate').value,'2026-10-06');
+  assert.equal(page.get('list').children.length,1);
+  assert.equal(page.get('list').children[0].dataset.managerEmployeeId,'EMP-NEW');
+  assert.equal(page.get('list').children[0].children[2].textContent,'予定: 10:00–18:00');
+});
+
+test('employee view hides the manager-only selector and preserves the employee request accordion', async () => {
+  const page=makePage({initialRequests:[{requestId:'request-1',workDate:'2026-10-05',startTime:'09:00',endTime:'17:00',requestType:'修正申請',status:'申請中'}],initialState:{employeeId:'EMP-01',displayName:'本人',revision:1,schedule:null,attendance:null}});
+  await page.context.load(false);
+  assert.equal(page.get('managerEmployeeLabel').hidden,true);
+  assert.equal(page.get('requestStatusSection').hidden,false);
+  assert.equal(page.get('requestStatusList').children.length,1);
+  assert.equal(page.get('entryCard').hidden,false);
 });
 
 test('overnight employee schedule can be submitted for correction and stays unchanged until approval', async () => {
