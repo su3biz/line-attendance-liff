@@ -74,10 +74,10 @@
 <script>
 'use strict';
 const LIFF_ID='2012227652-CgVMkyBb';
-const GAS_URL='https://script.google.com/macros/s/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS/exec';
+const GAS_URL='https://script.google.com/macros/s/AKfycbxzZqjeGmQ-npCzdnNzJ0G8NiIxLBoV4wzoys3iufXLMlkbB0CvntBo3F8xEpL4rAzK/exec';
 let token='',busy=false,requestSequence=0,liffReady=false,liffInitPromise=null,requestListAttempted=false,managerRequestListAttempted=false,employeeRequestRole=false,employeeRequestsCache=[],managerRequestsCache=[];
 const app=document.getElementById('app');
-// This entry point is bound to the existing DEV LIFF and DEV GAS deployment. DEMO has its own entry point and credentials.
+// Diagnostic panels are restricted to the DEV GAS deployment. DEMO has its own entry point and credentials.
 const diagnosticEnabled=LIFF_ID==='2012227652-CgVMkyBb'&&GAS_URL==='https://script.google.com/macros/s/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS/exec'&&new URLSearchParams(window.location.search).get('debug')==='1';
 const savePerformancePanel=document.getElementById('savePerformance'),savePerformanceOutput=document.getElementById('savePerformanceOutput');
 savePerformancePanel.hidden=!diagnosticEnabled;
