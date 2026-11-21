@@ -7,6 +7,7 @@ const { test } = require('node:test');
 const vm = require('node:vm');
 
 const HTML = fs.readFileSync(path.join(__dirname, '..', 'debug.html'), 'utf8');
+const DEMO_HTML = fs.readFileSync(path.join(__dirname, '..', 'demo', 'debug.html'), 'utf8');
 const SCRIPT = HTML.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
 
 function element(tagName='div') {
@@ -19,13 +20,13 @@ function element(tagName='div') {
   };
 }
 
-function makePage({authorized=true,fetchFailure=null,stateError=null,confirm=true,delaySwitch=false,timeoutMode='',initFailure=false,initHang=false,targets=[{employeeId:'T-02',displayName:'従業員02',role:'employee'}]}={}) {
+function makePage({authorized=true,fetchFailure=null,stateError=null,confirm=true,delaySwitch=false,timeoutMode='',initFailure=false,initHang=false,targets=[{employeeId:'T-02',displayName:'従業員02',role:'employee'}],html=HTML}={}) {
   const elements=new Map(),requests=[],confirmMessages=[],redirects=[];
   const get=(id)=>{if(!elements.has(id))elements.set(id,element(id==='targetUser'?'select':'div'));return elements.get(id);};
   let resolveSwitch;
   const context=vm.createContext({
     document:{getElementById:get,createElement:(tag)=>element(tag)},
-    window:{location:{href:'https://example.test/debug.html',replace(url){redirects.push(url);}},confirm(message){confirmMessages.push(message);return confirm;}},
+    window:{location:{href:html===DEMO_HTML?'https://example.test/demo/debug.html':'https://example.test/debug.html',replace(url){redirects.push(url);}},confirm(message){confirmMessages.push(message);return confirm;}},
     URL,URLSearchParams,Option:class Option{constructor(text,value){this.text=text;this.textContent=text;this.value=value;}},
     setTimeout(fn,ms){
       const lastAction=requests.at(-1)&&requests.at(-1).action;
@@ -49,7 +50,8 @@ function makePage({authorized=true,fetchFailure=null,stateError=null,confirm=tru
       throw Error('unexpected API action');
     },
   });
-  vm.runInContext(SCRIPT,context);
+  const script=html.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+  vm.runInContext(script,context);
   return {context,get,requests,confirmMessages,redirects,get resolveSwitch(){return resolveSwitch;}};
 }
 
@@ -62,7 +64,6 @@ test('debug switch page displays only the server-authorized user list and starts
   assert.equal(page.get('targetUser').value,'');
   assert.equal(page.get('changeButton').disabled,true);
 });
-
 test('unauthorized user receives no current assignment or target details', async()=>{
   const page=makePage({authorized:false});await settle();
   assert.equal(page.get('targetUser').disabled,true);
@@ -146,3 +147,18 @@ test('in-flight switch disables repeated submissions', async()=>{
   page.resolveSwitch();await pending;await settle();
   assert.equal(page.redirects.length,1);
 });
+
+test('customer demo switch uses only the customer demo connection and returns to demo index',async()=>{
+  assert.match(DEMO_HTML,/const LIFF_ID='2012227652-aPqnxqOi';/);
+  assert.match(DEMO_HTML,/const GAS_URL='https:\/\/script\.google\.com\/macros\/s\/AKfycbzdMHPEqF1b2fHhH2y-li0tO4KVH9FWwQtbBH2ozpJpHtEiSDRdnNvt2K2J7ABLRUmF4A\/exec';/);
+  assert.doesNotMatch(DEMO_HTML,/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS/);
+  const page=makePage({html:DEMO_HTML});await settle();
+  assert.equal(page.requests[0].action,'debugUserSwitchState');
+  page.get('targetUser').value='T-02';page.get('targetUser').handlers.change();
+  await page.get('changeButton').handlers.click();await settle();
+  assert.equal(page.requests[1].action,'debugUserSwitch');
+  assert.equal(page.redirects.length,1);
+  assert.match(page.redirects[0],/demo\/index\.html$/);
+});
+
+
