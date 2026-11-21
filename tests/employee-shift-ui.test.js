@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const demoHtml = fs.readFileSync(path.join(__dirname, '..', 'demo', 'index.html'), 'utf8');
 const match = html.match(/<script>\s*([\s\S]*?)<\/script>/);
 assert.ok(match, 'inline LIFF script exists');
 
@@ -28,7 +29,7 @@ function matches(node,selector){if(selector==='p')return node.tagName==='p';if(s
 function selectValues(select) { return select.children.map((option) => option.value); }
 function quarterHourValues() { return Array.from({ length: 96 }, (_unused, index) => `${String(Math.floor(index / 4)).padStart(2, '0')}:${String((index % 4) * 15).padStart(2, '0')}`); }
 
-function makePage({ initialState, confirm = true, mutationFailure = null, requestFailure = null, approveFailure = null, rejectFailure = null, responseWorkDate = null, dateClass = 'future', actorRole = 'employee', disabledActions = [], shiftWritesEnabled = true, attendanceWritesEnabled = true, attendanceRecords = [], attendanceRecordsByDate = {}, attendanceListGates = {}, diagnosticMode = false, initialRequests = [], duplicateRequest = false } = {}) {
+function makePage({ initialState, confirm = true, mutationFailure = null, requestFailure = null, approveFailure = null, rejectFailure = null, responseWorkDate = null, dateClass = 'future', actorRole = 'employee', disabledActions = [], shiftWritesEnabled = true, attendanceWritesEnabled = true, attendanceRecords = [], attendanceRecordsByDate = {}, attendanceListGates = {}, diagnosticMode = false, initialRequests = [], duplicateRequest = false, htmlSource = html } = {}) {
   const elements = new Map();
   const requests = [];
   const employeeRequests = initialRequests.map((request) => ({ ...request }));
@@ -140,7 +141,8 @@ function makePage({ initialState, confirm = true, mutationFailure = null, reques
       throw new Error(`unexpected action ${fields.action}`);
     },
   });
-  const script = match[1].replace(/\nstart\(\);\s*$/, '\n');
+  const pageScript = htmlSource.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+  const script = pageScript.replace(/\nstart\(\);\s*$/, '\n');
   vm.runInContext(script, context);
   get('workDate').value = '2026-10-05';
   return { context, get, requests, confirmMessages, employeeRequests };
@@ -630,6 +632,32 @@ test('all four cases display the specified source times and enable delete only w
   }
 });
 
+test('customer demo deletion request follows canonical data and write permissions, not pending request times', async () => {
+  const extractScript=source=>source.match(/<script>\s*([\s\S]*?)<\/script>/)[1];
+  assert.match(demoHtml,/const LIFF_ID='2012227652-aPqnxqOi';/);
+  assert.match(demoHtml,/const GAS_URL='https:\/\/script\.google\.com\/macros\/s\/AKfycbzdMHPEqF1b2fHhH2y-li0tO4KVH9FWwQtbBH2ozpJpHtEiSDRdnNvt2K2J7ABLRUmF4A\/exec';/);
+  const applyFunction=source=>extractScript(source).match(/function applyWriteMode\(\)\{[\s\S]*?\n\}/)[0];
+  assert.equal(applyFunction(demoHtml),applyFunction(html));
+  const pending = [{requestId:'00000000-0000-4000-8000-000000000001',workDate:'2026-10-05',startTime:'00:15',endTime:'02:00',requestType:'修正申請',status:'申請中'}];
+  const cases = [
+    { name:'canonical empty despite pending edit times', initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,stateToken:'a'.repeat(64),schedule:null,attendance:null}, requestDisabled:true },
+    { name:'schedule only', initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,stateToken:'a'.repeat(64),schedule:{startTime:'09:00',endTime:'17:00'},attendance:null}, requestDisabled:false },
+    { name:'attendance only with permissions', initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,stateToken:'a'.repeat(64),schedule:null,attendance:{startTime:'08:55',endTime:'17:05'}}, requestDisabled:false },
+    { name:'attendance only without attendance write permission', initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,stateToken:'a'.repeat(64),schedule:null,attendance:{startTime:'08:55',endTime:'17:05'}}, attendanceWritesEnabled:false, requestDisabled:true },
+    { name:'writes disabled', initialState:{employeeId:'EMP-01',displayName:'本人',revision:0,stateToken:'a'.repeat(64),schedule:{startTime:'09:00',endTime:'17:00'},attendance:null}, shiftWritesEnabled:false, requestDisabled:true },
+  ];
+  for (const item of cases) {
+    const page=makePage({...item,htmlSource:demoHtml,initialRequests:pending});
+    vm.runInContext(`shiftWritesEnabled=${item.shiftWritesEnabled!==false};attendanceWritesEnabled=${item.attendanceWritesEnabled!==false};`,page.context);
+    page.context.render({actorRole:'employee',dateClass:'today',workDate:'2026-10-05',selfShift:item.initialState});
+    assert.equal(page.get('startTime').value,item.initialState.attendance?.startTime || item.initialState.schedule?.startTime || '', `${item.name}: form uses canonical state`);
+    assert.equal(page.get('deleteButton').disabled,item.requestDisabled,item.name);
+    vm.runInContext('busy=true;applyWriteMode()',page.context);
+    assert.equal(page.get('deleteButton').disabled,true,`${item.name}: busy gate`);
+    vm.runInContext('busy=false;applyWriteMode()',page.context);
+  }
+});
+
 test('either single schedule endpoint remains eligible for deletion request without clearing schedule', async () => {
   for (const schedule of [{ startTime: '09:00', endTime: '' }, { startTime: '', endTime: '17:00' }]) {
     const page = makePage({ initialState: { employeeId: 'EMP-01', displayName: '本人', revision: 2, schedule, attendance: null } });
@@ -1087,3 +1115,4 @@ test('initial work date and current employee controls stay in the existing atten
   assert.match(html, /<label>終了 /);
   assert.doesNotMatch(html, /id="shiftForm"/);
 });
+
