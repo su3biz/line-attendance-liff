@@ -405,7 +405,7 @@ function render(data){
  managerEmployeeLabel.hidden=data.actorRole!=='manager';
  const nextEmployeeRequestRole=data.actorRole==='employee';
  if(!nextEmployeeRequestRole||!employeeRequestRole){employeeRequestsCache=[];requestListAttempted=false;requestStatusSection.hidden=true;requestStatusSection.open=false;}
- employeeRequestRole=nextEmployeeRequestRole;managerRequestSection.hidden=data.actorRole!=='manager';
+ employeeRequestRole=nextEmployeeRequestRole;managerRequestSection.hidden=data.actorRole!=='manager' || managerRequestsCache.length === 0;
  monthSheetsMessage.hidden=true;monthSheetsMessage.textContent='';entryCard.hidden=true;
  if(data.monthSheetsMissing){managerRecords=[];selectedManagerEmployeeId='';managerEmployeeSelect.replaceChildren();managerEmployeeSelect.disabled=true;list.replaceChildren();monthSheetsMessage.textContent='対象月のシフト表または勤怠表がありません。';monthSheetsMessage.hidden=false;applyWriteMode();return;}
  if(data.actorRole==='employee'&&data.selfShift){
