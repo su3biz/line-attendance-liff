@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>ユーザー切替（テスト用）</title>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#202124;background:#f6f8fb;font-size:16px}
+*{box-sizing:border-box}
+body{margin:0;padding:24px 16px;min-height:100vh}
+main{width:min(100%,440px);margin:0 auto;background:#fff;border:1px solid #d8dee8;border-radius:16px;padding:22px;box-shadow:0 4px 18px #172b4d12}
+h1{font-size:1.35rem;line-height:1.4;margin:0 0 22px}
+.field{display:grid;gap:8px;margin:0 0 18px}
+.field label{font-weight:650}
+.current{padding:12px;border-radius:10px;background:#f1f4f8;min-height:48px}
+select,button{font:inherit;min-height:46px;border-radius:10px;width:100%}
+select{padding:8px 10px;border:1px solid #9aa7b8;background:#fff;color:inherit}
+button{padding:10px 14px;font-weight:650;cursor:pointer}
+button:disabled{opacity:.52;cursor:not-allowed}
+#changeButton{border:0;background:#147d43;color:white;margin-top:2px}
+#backButton{border:1px solid #8793a3;background:#fff;color:#253247;margin-top:10px}
+#message{min-height:24px;margin:10px 0 0;white-space:pre-wrap;line-height:1.5}
+.error{color:#a32020}.success{color:#176b39}.hint{color:#596579;font-size:.9rem;margin:2px 0 14px}
+@media(max-width:360px){main{padding:18px 14px}}
+</style>
+</head>
+<body>
+<main>
+<h1>ユーザー切替（テスト用）</h1>
+<section class="field" aria-live="polite"><span class="field-label">現在のユーザー</span><div id="currentUser" class="current">確認中…</div></section>
+<section class="field"><label for="targetUser">切替先</label><select id="targetUser" disabled><option value="">ユーザーを選択してください</option></select></section>
+<p class="hint">許可された未割当ユーザーのみ選択できます。</p>
+<button id="changeButton" type="button" disabled>ユーザーを変更する</button>
+<button id="backButton" type="button">勤務予定・実績に戻る</button>
+<p id="message" role="status" aria-live="polite"></p>
+</main>
+<script>
+(()=>{
+'use strict';
+const LIFF_ID='2012227652-CgVMkyBb';
+const GAS_URL='https://script.google.com/macros/s/AKfycbwNVg7XfJfnh1JUq_YDT5GQnaqGdMkYyhvqoZcdg0m2Xg6XKeO_8mVaUXqrFsJNyQBn/exec';
+const LIFF_INIT_TIMEOUT_MS=15000,API_TIMEOUT_MS=20000;
+const currentUser=document.getElementById('currentUser'),targetUser=document.getElementById('targetUser');
+const changeButton=document.getElementById('changeButton'),backButton=document.getElementById('backButton'),message=document.getElementById('message');
+let token='',busy=false;
+const messages={DEBUG_UNAVAILABLE:'ユーザー切替は現在利用できません。',DEBUG_FORBIDDEN:'このLINEアカウントは利用を許可されていません。',
+ DEBUG_TARGET_UNAVAILABLE:'切替先は未割当ではありません。画面を再読み込みしてください。',DEBUG_TARGET_FORBIDDEN:'この切替先は許可されていません。',
+ DEBUG_BUSY:'別の切替処理中です。状態を確認してから再読み込みしてください。',DEBUG_WRITE_FAILED:'切替を保存できませんでした。状態を再読み込みして確認してください。',
+ DEBUG_OUTCOME_UNKNOWN:'切替結果を確認できません。再操作せず、画面を再読み込みしてください。',DEBUG_STATE_UNAVAILABLE:'割当情報を取得できません。管理者に確認してください。',
+ AUTHENTICATION_FAILED:'LINE認証を確認できません。LINEから開き直してください。',LIFF_INIT_TIMEOUT:'LINE認証の初期化がタイムアウトしました。LINEから開き直してください。',
+ TRANSPORT_TIMEOUT:'状態取得がタイムアウトしました。画面を再読み込みして確認してください。',TRANSPORT_ERROR:'通信に失敗しました。通信状態を確認してください。',
+ RESPONSE_INVALID:'サーバー応答を確認できません。画面を再読み込みしてください。',INITIALIZATION_FAILED:'初期化に失敗しました。LINEから開き直してください。'};
+function roleLabel(role){return role==='manager'?'店長':role==='employee'?'従業員':'';}
+function setMessage(text,kind=''){message.textContent=text;message.className=kind;}
+function setBusy(value){busy=value;targetUser.disabled=value||targetUser.options.length<=1;changeButton.disabled=value||!targetUser.value;backButton.disabled=value;}
+function withTimeout(promise,ms,code,onTimeout){let timer;const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>{if(onTimeout)onTimeout();reject(Object.assign(new Error(code),{code}));},ms);});return Promise.race([promise,timeout]).finally(()=>clearTimeout(timer));}
+function errorMessage(error){const code=error&&/^[A-Z][A-Z0-9_]{0,63}$/.test(error.code||'')?error.code:'INITIALIZATION_FAILED';return code+'：'+(messages[code]||'処理に失敗しました。状態を確認してください。');}
+async function callApi(action,fields={}){
+ if(!token)throw Object.assign(new Error(messages.AUTHENTICATION_FAILED),{code:'AUTHENTICATION_FAILED'});
+ const body=new URLSearchParams({action,id_token:token,...fields});
+ let response,result;
+ const controller=typeof AbortController==='function'?new AbortController():null,timeoutCode=action==='debugUserSwitch'?'DEBUG_OUTCOME_UNKNOWN':'TRANSPORT_TIMEOUT';
+ try{response=await withTimeout(fetch(GAS_URL,{method:'POST',body,redirect:'follow',referrerPolicy:'no-referrer',cache:'no-store',...(controller?{signal:controller.signal}:{})}),API_TIMEOUT_MS,timeoutCode,()=>{if(controller)controller.abort();});}
+ catch(error){if(error&&error.code===timeoutCode)throw error;throw Object.assign(new Error('通信に失敗しました。'),{code:action==='debugUserSwitch'?'DEBUG_OUTCOME_UNKNOWN':'TRANSPORT_ERROR'});}
+ if(!response.ok)throw Object.assign(new Error('通信結果が不明です。再操作せず、状態を確認してください。'),{code:action==='debugUserSwitch'?'DEBUG_OUTCOME_UNKNOWN':'TRANSPORT_ERROR'});
+ try{result=await response.json();}
+  catch(_){throw Object.assign(new Error('通信結果が不明です。再操作せず、状態を確認してください。'),{code:action==='debugUserSwitch'?'DEBUG_OUTCOME_UNKNOWN':'RESPONSE_INVALID'});}
+  if(!result||typeof result!=='object'||Array.isArray(result))throw Object.assign(new Error('通信結果が不明です。再操作せず、状態を確認してください。'),{code:action==='debugUserSwitch'?'DEBUG_OUTCOME_UNKNOWN':'RESPONSE_INVALID'});
+ if(!result.ok)throw Object.assign(new Error(messages[result.code]||'処理できませんでした。'),{code:result.code||'OTHER',correlationId:result.correlationId||''});
+ return result;
+}
+function userText(user){return user.displayName+'（'+roleLabel(user.role)+'）';}
+async function start(){
+ currentUser.textContent='LINE認証の初期化中…';
+ setMessage('LINE認証を確認しています…');
+ try{
+  await withTimeout(liff.init({liffId:LIFF_ID}),LIFF_INIT_TIMEOUT_MS,'LIFF_INIT_TIMEOUT');
+  if(!liff.isLoggedIn()){const redirect=new URL(window.location.pathname,window.location.origin);liff.login({redirectUri:redirect.toString()});return;}
+  token=liff.getIDToken()||'';
+  if(!token)throw Object.assign(new Error(messages.AUTHENTICATION_FAILED),{code:'AUTHENTICATION_FAILED'});
+  const state=await callApi('debugUserSwitchState');
+  if(!state.currentUser||!Array.isArray(state.targets))throw Object.assign(new Error(messages.DEBUG_STATE_UNAVAILABLE),{code:'DEBUG_STATE_UNAVAILABLE'});
+  currentUser.textContent=userText(state.currentUser);
+  targetUser.replaceChildren(new Option('ユーザーを選択してください',''));
+  for(const user of state.targets){if(!user||typeof user.employeeId!=='string'||!user.displayName||!roleLabel(user.role))continue;targetUser.add(new Option(userText(user),user.employeeId));}
+  targetUser.disabled=state.targets.length===0;changeButton.disabled=true;
+  setMessage(state.targets.length?'許可された切替先を選択してください。':'切替可能な未割当ユーザーはいません。');
+ }catch(error){
+  token='';targetUser.replaceChildren(new Option('利用できません',''));targetUser.disabled=true;changeButton.disabled=true;
+  currentUser.textContent='ユーザー情報を確認できません';
+  setMessage(errorMessage(error), 'error');
+ }
+}
+targetUser.addEventListener('change',()=>{changeButton.disabled=busy||!targetUser.value;});
+changeButton.addEventListener('click',async()=>{
+ if(busy||!targetUser.value)return;
+ const employeeId=targetUser.value;
+ if(!window.confirm('選択したユーザーへ切り替えます。続けますか？'))return;
+ setBusy(true);setMessage('切替処理中…');
+ try{
+  const result=await callApi('debugUserSwitch',{employeeId});
+  setMessage('切替が完了しました。勤務情報を再取得します。','success');
+  token='';
+  const destination=new URL('./index.html',window.location.href);destination.search='';destination.hash='';
+  setTimeout(()=>window.location.replace(destination.toString()),350);
+ }catch(error){
+  const suffix=error&&/^[a-z0-9]{12}$/.test(error.correlationId||'')?'（照合ID：'+error.correlationId+'）':'';
+   currentUser.textContent='切替結果を確認してください';
+   setMessage(errorMessage(error)+suffix,'error');
+  token='';
+  changeButton.disabled=true;targetUser.disabled=true;
+ }
+});
+backButton.addEventListener('click',()=>{const destination=new URL('./index.html',window.location.href);destination.search='';destination.hash='';window.location.replace(destination.toString());});
+start();
+})();
+</script>
+</body>
+</html>
+
