@@ -42,7 +42,7 @@
 <h1>勤務予定・実績</h1>
 <p>勤務日と勤務時間を確認し、修正や削除は申請してください。</p>
 <details id="requestStatusSection" class="request-status" aria-label="申請状況" hidden><summary id="requestStatusToggle">申請状況</summary><div id="requestStatusList" aria-live="polite"></div></details>
-<details id="managerRequestSection" class="manager-request-panel" hidden><summary id="managerRequestCount">0件の申請があります。</summary><div id="managerRequestList" aria-live="polite"></div></details>
+<details id="managerRequestSection" class="manager-request-panel" hidden><summary id="managerRequestCount">0件の申請があります。</summary><div class="manager-request-batch"><label><input id="managerRequestSelectAll" type="checkbox" aria-label="申請をすべて選択">すべて選択</label><button id="managerRequestBatchApprove" type="button" disabled>選択分を一括承認</button></div><div id="managerRequestList" aria-live="polite"></div></details>
 <div id="workControls"><label class="muted">勤怠日 <input id="workDate" type="date" min="2026-10-01" required></label><label id="managerEmployeeLabel" class="muted" hidden>従業員 <select id="managerEmployeeSelect" aria-label="従業員" disabled></select></label></div>
 <p id="monthSheetsMessage" class="month-sheets-message" role="status" aria-live="polite" hidden></p>
 <section id="entryCard" class="entry-card" hidden>
@@ -75,7 +75,9 @@
 'use strict';
 const LIFF_ID='2012227652-CgVMkyBb';
 const GAS_URL='https://script.google.com/macros/s/AKfycbwNVg7XfJfnh1JUq_YDT5GQnaqGdMkYyhvqoZcdg0m2Xg6XKeO_8mVaUXqrFsJNyQBn/exec';
-let token='',busy=false,requestSequence=0,liffReady=false,liffInitPromise=null,requestListAttempted=false,managerRequestListAttempted=false,employeeRequestRole=false,employeeRequestsCache=[],managerRequestsCache=[];
+let token='',busy=false,requestSequence=0,liffReady=false,liffInitPromise=null,requestListAttempted=false,managerRequestListAttempted=false,employeeRequestRole=false,employeeRequestsCache=[],managerRequestsCache=[],managerRequestSelection=new Set();
+const managerRequestBatchApprove=document.getElementById('managerRequestBatchApprove');const managerRequestSelectAll=document.getElementById('managerRequestSelectAll');
+managerRequestBatchApprove.addEventListener('click',approveManagerRequestsBatch);managerRequestSelectAll.addEventListener('change',()=>{managerRequestSelection=new Set(managerRequestSelectAll.checked?managerRequestsCache.map(request=>request.requestId):[]);renderManagerRequests(managerRequestsCache);});
 const app=document.getElementById('app');
 // Diagnostic panels are restricted to the DEV GAS deployment. DEMO has its own entry point and credentials.
 const diagnosticEnabled=LIFF_ID==='2012227652-CgVMkyBb'&&GAS_URL==='https://script.google.com/macros/s/AKfycbx4hCvYIKhSJlnDpGaKAUTk8iiEkvWaxfp957GDirqv3dam6rhloMM9FDAmP4VQtMPS/exec'&&new URLSearchParams(window.location.search).get('debug')==='1';
@@ -187,7 +189,7 @@ async function ensureFreshIdToken(){
 }
 async function api(fields,phase='attendance',measurement=null){
  const safePhase=CLIENT_DIAGNOSTIC_PHASES.has(phase)?phase:'attendance';
- const requestOperation=fields&&['requestApprove','requestCancel'].includes(fields.action),diagnosticId=requestOperation&&diagnosticEnabled?makeRequestDiagnosticId():'';
+ const requestOperation=fields&&['requestApprove','requestApproveBatch','requestCancel'].includes(fields.action),diagnosticId=requestOperation&&diagnosticEnabled?makeRequestDiagnosticId():'';
  const apiFields=diagnosticId?Object.assign({},fields,{diagnosticId}):fields;
  trace(safePhase+'_request','開始','要求を生成');
  if(requestOperation)trace('request_operation','開始',fields.action+' / '+(diagnosticId?'correlation '+diagnosticId:'correlation disabled'));
@@ -283,7 +285,9 @@ async function refreshEmployeeRequests({quiet=false}={}){
 function renderManagerRequests(requests){
  managerRequestList.replaceChildren();
  const ordered=(Array.isArray(requests)?requests:[]).filter(row=>row&&typeof row.requestId==='string'&&row.requestId&&row.status==='申請中'&&['修正申請','削除申請'].includes(row.requestType)).sort((a,b)=>String(a.workDate).localeCompare(String(b.workDate))||(Number(a.employeeOrder)||0)-(Number(b.employeeOrder)||0));
- managerRequestsCache=ordered;managerRequestSection.hidden=ordered.length===0;managerRequestCount.textContent=ordered.length+'件の申請があります。';
+ managerRequestsCache=ordered;managerRequestSelection=new Set([...managerRequestSelection].filter(id=>ordered.some(request=>request.requestId===id)));managerRequestSection.hidden=ordered.length===0;managerRequestCount.textContent=ordered.length+'件の申請があります。';
+ managerRequestSelectAll.checked=ordered.length>0&&ordered.every(request=>managerRequestSelection.has(request.requestId));managerRequestSelectAll.indeterminate=managerRequestSelection.size>0&&!managerRequestSelectAll.checked;
+ managerRequestBatchApprove.disabled=managerRequestSelection.size===0||busy;
  for(const request of ordered){
   const row=document.createElement('div');row.className='manager-request-row';row.dataset.managerRequestRow='true';row.dataset.requestId=request.requestId;
   const heading=document.createElement('div');heading.className='manager-request-heading';
@@ -297,6 +301,7 @@ function renderManagerRequests(requests){
    const end=document.createElement('select');populateTimeSelect(end,request.endTime||'');end.dataset.reviewField='true';end.dataset.reviewEnd='true';end.setAttribute('aria-label','承認終了時刻');fields.appendChild(end);
   }else{const startTime=request.startTime||'',endTime=request.endTime||'';if(startTime||endTime){const times=document.createElement('span');times.textContent=startTime&&endTime?startTime+' ～ '+endTime:(startTime||endTime);times.dataset.reviewReadOnlyTimes='true';fields.appendChild(times);}}
   row.appendChild(fields);
+  const selection=document.createElement('label');selection.className='manager-request-selection';const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=managerRequestSelection.has(request.requestId);checkbox.dataset.reviewSelect='true';checkbox.setAttribute('aria-label',(request.displayName||'従業員')+'の申請を選択');checkbox.addEventListener('change',()=>{if(checkbox.checked)managerRequestSelection.add(request.requestId);else managerRequestSelection.delete(request.requestId);renderManagerRequests(managerRequestsCache);});selection.appendChild(checkbox);selection.appendChild(document.createTextNode('選択'));row.appendChild(selection);
   const actions=document.createElement('div');actions.className='manager-request-actions';
   const approveAction=document.createElement('div');approveAction.className='save-action';
   const approve=document.createElement('button');approve.type='button';approve.textContent='承認';approve.dataset.reviewApprove='true';approve.dataset.requestId=request.requestId;approve.addEventListener('click',()=>approveManagerRequest(request,row));approveAction.appendChild(approve);actions.appendChild(approveAction);
@@ -305,6 +310,15 @@ function renderManagerRequests(requests){
   row.appendChild(actions);managerRequestList.appendChild(row);
  }
  applyWriteMode();
+}
+async function approveManagerRequestsBatch(){
+ if(busy)return;const selected=managerRequestsCache.filter(request=>managerRequestSelection.has(request.requestId));if(!selected.length)return;
+ if(!window.confirm(selected.length+'件の申請を一括承認します。よろしいですか？'))return;
+ const items=selected.map(request=>{const row=managerRequestList.querySelector('[data-request-id="'+request.requestId+'"]');const date=row&&row.querySelector('[data-review-date]');const start=row&&row.querySelector('[data-review-start]');const end=row&&row.querySelector('[data-review-end]');return{requestId:request.requestId,workDate:date?date.value:request.workDate,startTime:start?start.value:request.startTime||'',endTime:end?end.value:request.endTime||''};});
+ busy=true;managerRequestSelectAll.disabled=true;managerRequestBatchApprove.disabled=true;status.textContent='';setLoading(true,'申請を一括承認しています…');let responseReceived=false,refreshed=false,successCount=0,failedCount=0;
+ try{const result=await api({action:'requestApproveBatch',requests:JSON.stringify(items)},'request');responseReceived=true;successCount=Number(result.approvedCount)||0;failedCount=Number(result.failedCount)||0;managerRequestSelection=new Set((result.results||[]).filter(item=>!item.ok).map(item=>item.requestId));status.textContent=failedCount?successCount+'件を承認し、'+failedCount+'件は失敗しました。失敗した申請は一覧に残しています。':'選択した'+successCount+'件の申請を承認しました。';}
+ catch(error){if(error.code!=='AUTH_RECOVERY_NAVIGATING')status.textContent='一括承認の結果を確認できません。申請一覧を更新します。'+(error.message||'');}
+ finally{refreshed=await refreshManagerRequests({quiet:true});if(!responseReceived&&refreshed)status.textContent+=' 一覧を更新しました。';busy=false;managerRequestSelectAll.disabled=false;applyWriteMode();renderManagerRequests(managerRequestsCache);setLoading(false);}
 }
 async function refreshManagerRequests({quiet=false}={}){
  try{const result=await api({action:'requestList'});renderManagerRequests(result.requests);managerRequestListAttempted=true;return true;}
@@ -348,7 +362,7 @@ async function submitEmployeeRequest(requestType){
   else if(error.code==='AUTH_RECOVERY_NAVIGATING')return;
   else status.textContent=unknown?'申請結果を確認できません。申請状況を更新しています。':error.message||'申請できませんでした。';
  }finally{
-  if(success||unknown){const refreshed=await refreshEmployeeRequests({quiet:true});if(success)status.textContent=requestType==='修正申請'?'修正申請を受け付けました。':'削除申請を受け付けました。';else if(refreshed)status.textContent='申請結果を確認しました。申請状況をご確認ください。';else status.textContent='申請結果を確認できません。通信状態を確認して再接続してください。';}
+ if(success){await refreshEmployeeRequests({quiet:true});status.textContent=requestType==='修正申請'?'修正申請を受け付けました。':'削除申請を受け付けました。';}else if(unknown){const refreshed=await refreshEmployeeRequests({quiet:true});if(refreshed)status.textContent='申請結果を確認しました。申請状況をご確認ください。';else status.textContent='申請結果を確認できません。通信状態を確認して再接続してください。';}
   busy=false;workDateInput.disabled=false;retry.disabled=false;applyWriteMode();setLoading(false);
  }
 }
